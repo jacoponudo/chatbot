@@ -64,6 +64,7 @@ try:
     else:
         user_info = st.session_state.user_info
         st.success(f"✅ Welcome, {user_info['name']} {user_info['surname']}!")
+        st.write(f"Place of birth: {user_info['birthplace']}")
         st.divider()
         
         # Create OpenAI client

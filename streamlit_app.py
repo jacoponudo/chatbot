@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 from openai import OpenAI
+from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
-import os
-import json
 
 # Show title and description.
 st.title("💬 Chatbot")
@@ -19,19 +18,24 @@ openai_api_key = st.text_input("OpenAI API Key", type="password")
 if not openai_api_key:
     st.info("Please add your OpenAI API key to continue.", icon="🗝️")
 else:
-    # Percorso del file CSV per salvare i dati
-    DATA_FILE = "users_data.csv"
+    # Connessione a Google Sheets
+    conn = st.connection("gsheets", type=GSheetsConnection)
     
-    # Funzione per caricare i dati
+    # Funzione per caricare i dati da Google Sheets
     def load_users_data():
-        if os.path.exists(DATA_FILE):
-            return pd.read_csv(DATA_FILE).to_dict('records')
-        return []
+        try:
+            df = conn.read(worksheet="users", usecols=list(range(4)))
+            return df.to_dict('records')
+        except:
+            return []
     
-    # Funzione per salvare i dati
+    # Funzione per salvare i dati su Google Sheets
     def save_users_data(users_list):
         df = pd.DataFrame(users_list)
-        df.to_csv(DATA_FILE, index=False, encoding='utf-8')
+        conn.update(
+            worksheet="users",
+            data=df,
+        )
     
     # Inizializza session state per i dati utente
     if "user_data_collected" not in st.session_state:
@@ -60,7 +64,7 @@ else:
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }
                     
-                    # Salva i dati nel file JSON
+                    # Salva i dati in Google Sheets
                     users_list = load_users_data()
                     users_list.append(st.session_state.user_info)
                     save_users_data(users_list)
@@ -130,7 +134,6 @@ else:
         
         with col2:
             if st.button("🗑️ Cancella tutti i dati"):
-                if os.path.exists(DATA_FILE):
-                    os.remove(DATA_FILE)
-                    st.success("✅ Tutti i dati sono stati cancellati!")
-                    st.rerun()
+                save_users_data(pd.DataFrame())
+                st.success("✅ Tutti i dati sono stati cancellati!")
+                st.rerun()

@@ -96,7 +96,7 @@ else:
                 df = pd.DataFrame([st.session_state.user_info])
                 
                 # Salva in CSV
-                filename = f"utenti_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                filename = f"/workspaces/chatbot/data/utenti_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                 df.to_csv(filename, index=False, encoding='utf-8')
                 st.success(f"✅ Dati salvati in {filename}")
                 st.dataframe(df, use_container_width=True)

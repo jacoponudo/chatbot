@@ -19,20 +19,19 @@ openai_api_key = st.text_input("OpenAI API Key", type="password")
 if not openai_api_key:
     st.info("Please add your OpenAI API key to continue.", icon="🗝️")
 else:
-    # Percorso del file JSON per salvare i dati
-    DATA_FILE = "users_data.json"
+    # Percorso del file CSV per salvare i dati
+    DATA_FILE = "users_data.csv"
     
     # Funzione per caricare i dati
     def load_users_data():
         if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            return pd.read_csv(DATA_FILE).to_dict('records')
         return []
     
     # Funzione per salvare i dati
     def save_users_data(users_list):
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(users_list, f, ensure_ascii=False, indent=2)
+        df = pd.DataFrame(users_list)
+        df.to_csv(DATA_FILE, index=False, encoding='utf-8')
     
     # Inizializza session state per i dati utente
     if "user_data_collected" not in st.session_state:

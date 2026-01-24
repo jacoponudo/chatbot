@@ -91,15 +91,20 @@ else:
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("💾 Salva dati in CSV"):
-                # Crea DataFrame dai dati dell'utente
-                df = pd.DataFrame([st.session_state.user_info])
-                
-                # Salva in CSV
-                filename = f"/workspaces/chatbot/data/utenti_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                df.to_csv(filename, index=False, encoding='utf-8')
-                st.success(f"✅ Dati salvati in {filename}")
-                st.dataframe(df, use_container_width=True)
+            # Crea DataFrame dai dati dell'utente
+            df = pd.DataFrame([st.session_state.user_info])
+            
+            # Converti in CSV
+            csv = df.to_csv(index=False, encoding='utf-8')
+            
+            # Download button
+            st.download_button(
+                label="💾 Scarica dati in CSV",
+                data=csv,
+                file_name=f"utenti_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+            st.dataframe(df, use_container_width=True)
         
         with col2:
             if st.button("🔄 Logout"):

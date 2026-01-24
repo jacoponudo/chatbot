@@ -119,32 +119,64 @@ st.markdown("""
         font-weight: 500;
     }
     
-    [data-testid="chatAvatarIcon-assistant"], [data-testid="chatAvatarIcon-user"] {
+    /* Hide all chat avatars */
+    [data-testid="chatAvatarIcon-assistant"],
+    [data-testid="chatAvatarIcon-user"],
+    [data-testid="stChatMessage"] > div > div:first-child {
         display: none !important;
     }
     
-    [role="presentation"] [data-testid="stChatMessage"] {
+    /* Chat message container styling */
+    [data-testid="stChatMessage"] {
         background: transparent !important;
-        padding: 1rem 0 !important;
+        padding: 1.5rem 0 !important;
     }
     
+    /* User message (right side) */
+    [data-testid="stChatMessage"]:has(div > div > span:contains('user')) {
+        display: flex;
+        justify-content: flex-end;
+    }
+    
+    /* Assistant message styling */
     [data-testid="stChatMessageContent"] {
-        background: white;
-        padding: 1.25rem 1.5rem;
-        border-radius: 10px;
-        border: 1px solid #e5e7eb;
-        line-height: 1.6;
+        background: transparent;
+        padding: 0;
+        border: none;
+        line-height: 1.7;
         color: #333;
         font-size: 0.95rem;
+        max-width: 100%;
     }
     
-    [data-testid="stChatMessage"]:has([data-testid="stChatMessageContent"] p) > div:first-child {
-        margin-right: auto;
-        max-width: 85%;
+    /* Assistant message text - serif font */
+    [data-testid="stChatMessage"]:not(:has([role="img"])) [data-testid="stChatMessageContent"] {
+        font-family: 'Georgia', 'Garamond', serif;
+        color: #333;
+        font-weight: 400;
     }
     
-    [data-testid="stChatMessage"]:last-child [data-testid="stChatMessageContent"] {
-        background: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%);
+    /* User message text - sans-serif font, lighter */
+    [data-testid="stChatMessage"] [data-testid="stChatMessageContent"] p {
+        margin: 0;
+        padding: 1rem 1.5rem;
+        border-radius: 10px;
+    }
+    
+    /* Differentiate user vs assistant through font only */
+    [role="presentation"] [data-testid="stChatMessage"] [data-testid="stChatMessageContent"] {
+        font-family: 'Segoe UI', sans-serif;
+        color: #555;
+    }
+    
+    /* Assistant gets serif, user gets sans-serif */
+    [data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] {
+        font-family: 'Georgia', 'Garamond', serif;
+    }
+    
+    [data-testid="stChatMessage"]:nth-child(even) [data-testid="stChatMessageContent"] {
+        font-family: 'Segoe UI', 'Trebuchet MS', sans-serif;
+        font-weight: 500;
     }
     
     [data-testid="stChatInputTextArea"] textarea {
@@ -195,11 +227,11 @@ st.markdown("""
 <div class="header-container">
     <div>
         <div class="cnr-logo">CNR</div>
-        <div class="cnr-tagline"></div>
+        <div class="cnr-tagline">Consiglio Nazionale delle Ricerche</div>
     </div>
     <div class="title-section">
         <h1>Everyday Norm Experiment</h1>
-        <p></p>
+        <p>A conversational study on social perceptions</p>
     </div>
 </div>
 """, unsafe_allow_html=True)

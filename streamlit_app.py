@@ -102,27 +102,6 @@ try:
                 conversation_json,
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ])
-        
-        # Button per logout
-        # Button per logout
-        st.divider()
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🔄 Logout"):
-                st.session_state.user_data_collected = False
-                st.session_state.messages = []
-                st.rerun()
-        
-        with col2:
-            if st.button("📊 Mostra salvate"):
-                st.subheader("Chat salvate")
-                data = sheet.get_all_records()
-                if data:
-                    df = pd.DataFrame(data)
-                    st.dataframe(df, use_container_width=True)
-                else:
-                    st.info("Nessuna chat salvata ancora")
 
 except KeyError as e:
     st.error(f"Errore: Configura nel secrets.toml: 'gcp_service_account', 'google_sheet_url' e 'openai_api_key'")

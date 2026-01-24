@@ -195,11 +195,11 @@ st.markdown("""
 <div class="header-container">
     <div>
         <div class="cnr-logo">CNR</div>
-        <div class="cnr-tagline">Consiglio Nazionale delle Ricerche</div>
+        <div class="cnr-tagline"></div>
     </div>
     <div class="title-section">
         <h1>Everyday Norm Experiment</h1>
-        <p>A conversational study on social perceptions</p>
+        <p></p>
     </div>
 </div>
 """, unsafe_allow_html=True)

@@ -21,7 +21,8 @@ else:
     try:
         # Carica le credenziali
         creds_dict = json.loads(credentials_json)
-        creds = Credentials.from_service_account_info(creds_dict)
+        scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
         
         # Apri il foglio

@@ -28,41 +28,7 @@ st.markdown("""
         padding: 2rem 3rem;
     }
     
-    .header-container {
-        display: flex;
-        align-items: center;
-        gap: 2rem;
-        margin-bottom: 3rem;
-        padding-bottom: 2rem;
-        border-bottom: 1px solid #e5e7eb;
-    }
-    
-    .cnr-logo {
-        font-size: 5rem;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-        color: #003d82;
-    }
-    
-    .cnr-tagline {
-        color: #666;
-        font-size: 0.95rem;
-        margin-top: 0.5rem;
-    }
-    
-    .title-section h1 {
-        font-size: 2rem;
-        font-weight: 600;
-        color: #1a1a1a;
-        margin: 0;
-        letter-spacing: -0.3px;
-    }
-    
-    .title-section p {
-        color: #666;
-        font-size: 1rem;
-        margin-top: 0.5rem;
-    }
+
     
     [data-testid="stForm"] {
         background: white;
@@ -225,19 +191,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Header
-st.markdown("""
-<div class="header-container">
-    <div>
-        <div class="cnr-logo">CNR</div>
-        <div class="cnr-tagline"></div>
-    </div>
-    <div class="title-section">
-        <h1>Beta Test Web App </h1>
-        <p></p>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+
 
 # Define 6 different prompts
 PROMPTS = {

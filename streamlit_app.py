@@ -193,9 +193,9 @@ st.markdown("""
 
 
 
-# Define 6 different prompts
+# Load prompts from external JSON file
 PROMPTS = {
-    "1_crying_parks": {
+    "1": {
         "title": "Social Norms - Crying in Public Parks",
         "description": "Discuss the social acceptability of showing emotions in public spaces",
         "system_prompt": """You are a conversational canvasser specializing in information-based persuasion about social norms.
@@ -237,7 +237,7 @@ PHASE 3 - Final Opinion Measurement (ONLY after substantial conversation):
 
 Remember: You are currently at the INITIAL GREETING phase. Start by saying "Hello" and then move naturally into Phase 1."""
     },
-    "2_mental_health": {
+    "2": {
         "title": "Mental Health & Wellness",
         "description": "Explore mental health awareness and wellness practices in modern society",
         "system_prompt": """You are a mental health awareness specialist and conversational guide.
@@ -279,7 +279,7 @@ PHASE 3 - Final Assessment (ONLY after substantial conversation):
 
 Start by saying "Hello" and then move naturally into Phase 1."""
     },
-    "3_climate_action": {
+    "3": {
         "title": "Climate Change & Sustainability",
         "description": "Discuss climate action and sustainable living practices",
         "system_prompt": """You are an environmental sustainability advocate and educator.
@@ -321,7 +321,7 @@ PHASE 3 - Final Opinion Measurement (ONLY after substantial conversation):
 
 Start by saying "Hello" and then move naturally into Phase 1."""
     },
-    "4_digital_wellness": {
+    "4": {
         "title": "Digital Wellness & Technology Use",
         "description": "Explore healthy relationships with technology and digital wellness",
         "system_prompt": """You are a digital wellness expert and conversational guide.
@@ -363,7 +363,7 @@ PHASE 3 - Final Assessment (ONLY after substantial conversation):
 
 Start by saying "Hello" and then move naturally into Phase 1."""
     },
-    "5_social_connection": {
+    "5": {
         "title": "Social Connection & Community",
         "description": "Discuss the importance of social bonds and building community",
         "system_prompt": """You are a social connection and community building specialist.
@@ -405,7 +405,7 @@ PHASE 3 - Final Assessment (ONLY after substantial conversation):
 
 Start by saying "Hello" and then move naturally into Phase 1."""
     },
-    "6_lifelong_learning": {
+    "6": {
         "title": "Lifelong Learning & Personal Growth",
         "description": "Explore continuous learning and personal development throughout life",
         "system_prompt": """You are a lifelong learning advocate and personal development coach.

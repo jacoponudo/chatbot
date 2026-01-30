@@ -616,16 +616,18 @@ try:
         with col_form:
             st.markdown("### Your Response")
             
+            # Text area FUORI dal form per permettere il callback
+            argumentation = st.text_area(
+                "Your argumentation:",
+                placeholder="Type your explanation here...",
+                height=300,
+                label_visibility="collapsed",
+                key="argumentation_input",
+                on_change=track_words_callback  # ← Traccia silenziosamente
+            )
+            
+            # Form solo per il bottone di submit
             with st.form("final_argumentation_form"):
-                # Aggiungi il callback per il tracking silenzioso
-                argumentation = st.text_area(
-                    "Your argumentation:",
-                    placeholder="Type your explanation here...",
-                    height=300,
-                    label_visibility="collapsed",
-                    key="argumentation_input",
-                    on_change=track_words_callback  # ← Traccia silenziosamente
-                )
                 submitted = st.form_submit_button("Submit and Complete", use_container_width=True)
 
             if submitted:
@@ -661,8 +663,6 @@ try:
                         """, unsafe_allow_html=True)
                 else:
                     st.markdown("<div class='error'>Please provide an argumentation to continue.</div>", unsafe_allow_html=True)
-        
-        with col_assistant:
             st.markdown("### AI Assistant")
             
             # Display chat messages

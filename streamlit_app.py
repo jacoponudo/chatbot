@@ -5,6 +5,8 @@ from datetime import datetime
 from openai import OpenAI
 import json
 import os
+import time
+from collections import defaultdict
 
 # Page configuration
 st.set_page_config(
@@ -322,7 +324,7 @@ def save_conversation_to_json(user_info, prompt_data, messages, filename=None):
 # ============================================================================
 # SALVATAGGIO SU GOOGLE SHEETS
 # ============================================================================
-def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, messages, argumentation):
+def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, messages, argumentation, word_tracking=None, final_chat_messages=None):
     """
     Salva i dati su Google Sheets.
     
@@ -333,18 +335,34 @@ def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, messages, a
         prompt_data (dict): Dati del prompt
         messages (list): Lista dei messaggi
         argumentation (str): Testo dell'argomentazione finale
+        word_tracking (dict): Tracking delle parole per secondo
+        final_chat_messages (list): Messaggi della chat finale
     
     Returns:
         bool: True se il salvataggio è riuscito, False altrimenti
     """
     try:
         conversation_json = json.dumps(messages, ensure_ascii=False, indent=2)
+        final_chat_json = json.dumps(final_chat_messages or [], ensure_ascii=False, indent=2)
+        
+        # Formatta il word tracking in modo leggibile
+        word_tracking_formatted = ""
+        if word_tracking:
+            sorted_tracking = sorted(word_tracking.items())
+            word_tracking_formatted = json.dumps(
+                {f"second_{i}": count for i, count in sorted_tracking},
+                ensure_ascii=False,
+                indent=2
+            )
+        
         sheet.append_row([
             user_info["prolific_id"],
             prompt_key,
             prompt_data["title"],
             conversation_json,
             argumentation,
+            word_tracking_formatted,  # ← Colonna con il tracking
+            final_chat_json,           # ← Colonna con la chat finale
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ])
         return True
@@ -393,6 +411,10 @@ try:
         st.session_state.final_chat_messages = []
     if "final_chat_greeting_sent" not in st.session_state:
         st.session_state.final_chat_greeting_sent = False
+    if "word_tracking" not in st.session_state:
+        st.session_state.word_tracking = defaultdict(int)
+    if "last_check_time" not in st.session_state:
+        st.session_state.last_check_time = time.time()
     
     # Verifica se i prompt sono stati caricati
     if not PROMPTS:
@@ -535,10 +557,11 @@ try:
             # Stream response
             with st.chat_message("assistant"):
                 response = st.write_stream(stream)
-                        # Check if conversation should end (LLM responds with ABRACADABRA)
-            if "ABRACADABRA" in response:
-                st.session_state.conversation_ended = True
-                st.rerun()
+                
+                # Check if conversation should end (LLM responds with ABRACADABRA)
+                if "ABRACADABRA" in response:
+                    st.session_state.conversation_ended = True
+                    st.rerun()
             
             response_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.markdown(f"<div class='timestamp'>{response_timestamp}</div>", unsafe_allow_html=True)
@@ -576,50 +599,68 @@ try:
         
         # Create two columns: form on left, AI Assistant on right
         col_form, col_assistant = st.columns([2, 1])
-        
+
+        def track_words_callback():
+            """Callback silenzioso che traccia le parole ogni secondo"""
+            current_time = time.time()
+            current_text = st.session_state.get("argumentation_input", "")
+            word_count = len(current_text.split()) if current_text.strip() else 0
+            
+            # Arrotonda il tempo al secondo più vicino
+            second_bucket = int(current_time)
+            
+            # Salva il conteggio delle parole per quel secondo
+            st.session_state.word_tracking[second_bucket] = word_count
+            st.session_state.last_check_time = current_time
+
         with col_form:
             st.markdown("### Your Response")
+            
             with st.form("final_argumentation_form"):
+                # Aggiungi il callback per il tracking silenzioso
                 argumentation = st.text_area(
                     "Your argumentation:",
                     placeholder="Type your explanation here...",
                     height=300,
-                    label_visibility="collapsed"
+                    label_visibility="collapsed",
+                    key="argumentation_input",
+                    on_change=track_words_callback  # ← Traccia silenziosamente
                 )
-                
                 submitted = st.form_submit_button("Submit and Complete", use_container_width=True)
-                
-                if submitted:
-                    if argumentation.strip():
-                        st.session_state.final_argumentation = argumentation
-                        
-                        # Save conversation to JSON locally
-                        save_conversation_to_json(user_info, prompt_data, st.session_state.messages)
-                        
-                        # Save to Google Sheets only now
-                        success = save_to_google_sheets(
-                            sheet,
-                            user_info,
-                            prompt_key,
-                            prompt_data,
-                            st.session_state.messages,
-                            argumentation
-                        )
-                        
-                        if success:
-                            st.markdown("""
+
+            if submitted:
+                if argumentation.strip():
+                    st.session_state.final_argumentation = argumentation
+                    
+                    # Traccia finale
+                    track_words_callback()
+                    
+                    # Stampa il tracking (solo tu lo vedi nei log/debug)
+                    print("📊 WORD TRACKING PER SECONDO:")
+                    for second, word_count in sorted(st.session_state.word_tracking.items()):
+                        print(f"  Secondo {second}: {word_count} parole")
+                    
+                    # Salva tutto normalmente
+                    save_conversation_to_json(user_info, prompt_data, st.session_state.messages)
+                    success = save_to_google_sheets(
+                        sheet,
+                        user_info,
+                        prompt_key,
+                        prompt_data,
+                        st.session_state.messages,
+                        argumentation,
+                        word_tracking=dict(st.session_state.word_tracking),
+                        final_chat_messages=st.session_state.final_chat_messages
+                    )
+                    
+                    if success:
+                        st.markdown("""
                             <div class="success-badge">
                                 ✅ Thank you for your participation! Your responses have been recorded.
                             </div>
-                            """, unsafe_allow_html=True)
-                            
-                            st.markdown("""
-                            <p style='color: #666; margin-top: 2rem; font-size: 0.95rem;'>
-                                Your data has been saved and will be used for research purposes only.
-                            </p>
-                            """, unsafe_allow_html=True)
-                    else:
-                        st.markdown("<div class='error'>Please provide an argumentation to continue.</div>", unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
+                else:
+                    st.markdown("<div class='error'>Please provide an argumentation to continue.</div>", unsafe_allow_html=True)
         
         with col_assistant:
             st.markdown("### AI Assistant")

@@ -3,10 +3,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 from datetime import datetime
-from openai import OpenAI
 import time
-import threading
-from collections import defaultdict
 
 # Page configuration
 st.set_page_config(
@@ -66,52 +63,6 @@ st.markdown("""
         font-weight: 500;
     }
     
-    [data-testid="chatAvatarIcon-assistant"], [data-testid="chatAvatarIcon-user"] {
-        display: none !important;
-    }
-    
-    [role="presentation"] [data-testid="stChatMessage"] {
-        background: transparent !important;
-        padding: 1rem 0 !important;
-    }
-    
-    [data-testid="stChatMessageContent"] {
-        background: white;
-        padding: 1.25rem 1.5rem;
-        border-radius: 10px;
-        border: 1px solid #e5e7eb;
-        line-height: 1.6;
-        color: #333;
-        font-size: 0.95rem;
-    }
-    
-    [data-testid="stChatMessage"]:has([data-testid="stChatMessageContent"] p) > div:first-child {
-        margin-right: auto;
-        max-width: 85%;
-    }
-    
-    [data-testid="stChatMessage"]:last-child [data-testid="stChatMessageContent"] {
-        background: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%);
-    }
-    
-    [data-testid="stChatInputTextArea"] textarea {
-        border: 1.5px solid #e5e7eb !important;
-        border-radius: 8px !important;
-        padding: 1rem !important;
-        font-size: 0.95rem !important;
-    }
-    
-    [data-testid="stChatInputTextArea"] textarea:focus {
-        border-color: #003d82 !important;
-        box-shadow: 0 0 0 3px rgba(0, 61, 130, 0.1) !important;
-    }
-    
-    .timestamp {
-        font-size: 0.8rem;
-        color: #999;
-        margin-top: 0.5rem;
-    }
-    
     [data-testid="stTextArea"] textarea {
         border: 1.5px solid #e5e7eb !important;
         border-radius: 8px !important;
@@ -133,8 +84,30 @@ st.markdown("""
         border-left: 4px solid #ef4444;
         font-size: 0.95rem;
     }
+    
+    .debug-info {
+        background: #f3f4f6;
+        padding: 1rem;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        color: #666;
+        margin-top: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# ============================================================================
+# AUTO-REFRESH TIMER - Forza rerun ogni secondo
+# ============================================================================
+
+def init_auto_refresh():
+    """Inizializza il timer per l'auto-refresh"""
+    if "refresh_count" not in st.session_state:
+        st.session_state.refresh_count = 0
+    if "start_time" not in st.session_state:
+        st.session_state.start_time = time.time()
+    if "last_refresh" not in st.session_state:
+        st.session_state.last_refresh = time.time()
 
 # ============================================================================
 # CONFIGURAZIONE GOOGLE SHEETS
@@ -162,17 +135,13 @@ def init_google_sheets():
 
 
 def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, argumentation, text_tracking, final_chat_messages):
-    """
-    Salva i dati su Google Sheets alla fine della sessione.
-    Include il tracking del testo per ogni secondo in formato JSON.
-    """
+    """Salva i dati su Google Sheets"""
     try:
         final_chat_json = json.dumps(final_chat_messages or [], ensure_ascii=False, indent=2)
         
         # Formatta il text tracking in JSON strutturato
         text_tracking_json = ""
         if text_tracking:
-            # Crea un dizionario con timestamp leggibili e il testo corrispondente
             formatted_tracking = {}
             for timestamp, text_data in sorted(text_tracking.items()):
                 readable_time = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
@@ -190,7 +159,7 @@ def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, argumentati
             prompt_key,
             prompt_data["title"],
             argumentation,
-            text_tracking_json,  # JSON con tutto il testo per ogni secondo
+            text_tracking_json,
             final_chat_json,
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ])
@@ -201,61 +170,17 @@ def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, argumentati
 
 
 # ============================================================================
-# THREAD TRACKER - Traccia testo ogni secondo
+# INITIALIZE SESSION STATE
 # ============================================================================
 
-class BackgroundTracker(threading.Thread):
-    def __init__(self, session_state):
-        super().__init__(daemon=True)
-        self.session_state = session_state
-        self.is_running = False
-        self.last_saved_second = None
-    
-    def run(self):
-        """Loop in background che traccia il testo ogni secondo"""
-        self.is_running = True
-        while self.is_running:
-            try:
-                current_time = time.time()
-                current_second = int(current_time)
-                
-                # Se è un nuovo secondo, traccia il contenuto
-                if current_second != self.last_saved_second:
-                    content = self.session_state.get("argumentation_input", "")
-                    word_count = len(content.split()) if content.strip() else 0
-                    char_count = len(content)
-                    
-                    # Salva nel tracking con tutte le informazioni
-                    self.session_state.text_tracking[current_second] = {
-                        "text": content,
-                        "word_count": word_count,
-                        "char_count": char_count
-                    }
-                    
-                    # Log silenzioso
-                    readable_time = datetime.fromtimestamp(current_second).strftime("%H:%M:%S")
-                    print(f"[{readable_time}] Tracked: {word_count} words, {char_count} chars")
-                    
-                    self.last_saved_second = current_second
-                
-                time.sleep(0.05)  # Check every 50ms
-            
-            except Exception as e:
-                print(f"Tracker error: {str(e)}")
-                time.sleep(1)
-    
-    def stop(self):
-        """Ferma il tracker"""
-        self.is_running = False
+init_auto_refresh()
 
-
-# Initialize session state
 if "final_argumentation" not in st.session_state:
     st.session_state.final_argumentation = None
 if "final_chat_messages" not in st.session_state:
     st.session_state.final_chat_messages = []
 if "text_tracking" not in st.session_state:
-    st.session_state.text_tracking = {}  # Cambiato da word_tracking a text_tracking
+    st.session_state.text_tracking = {}
 if "user_info" not in st.session_state:
     st.session_state.user_info = {
         "prolific_id": "TEST_USER_001",
@@ -263,22 +188,43 @@ if "user_info" not in st.session_state:
     }
 if "sheet_connected" not in st.session_state:
     st.session_state.sheet_connected = False
-if "tracker" not in st.session_state:
-    st.session_state.tracker = None
 if "selected_prompt_key" not in st.session_state:
     st.session_state.selected_prompt_key = "norm_test"
+if "is_submitted" not in st.session_state:
+    st.session_state.is_submitted = False
 
 # Tentare la connessione a Google Sheets
 sheet, is_connected = init_google_sheets()
 st.session_state.sheet_connected = is_connected
 
-# Avvia tracker in background se non è già avviato
-if st.session_state.tracker is None:
-    st.session_state.tracker = BackgroundTracker(st.session_state)
-    st.session_state.tracker.start()
+# ============================================================================
+# TRACKING LOGIC - Salva ad ogni rerun
+# ============================================================================
+
+def track_current_text(text_content):
+    """Traccia il testo corrente con timestamp"""
+    if not st.session_state.is_submitted:
+        current_time = time.time()
+        current_second = int(current_time)
+        
+        word_count = len(text_content.split()) if text_content.strip() else 0
+        char_count = len(text_content)
+        
+        # Salva solo se è cambiato qualcosa o è un nuovo secondo
+        if current_second not in st.session_state.text_tracking or \
+           st.session_state.text_tracking.get(current_second, {}).get("text", "") != text_content:
+            
+            st.session_state.text_tracking[current_second] = {
+                "text": text_content,
+                "word_count": word_count,
+                "char_count": char_count
+            }
+            
+            readable_time = datetime.fromtimestamp(current_second).strftime("%H:%M:%S")
+            print(f"[{readable_time}] Tracked: {word_count} words, {char_count} chars")
 
 # ============================================================================
-# UI - Pulita e semplice
+# UI
 # ============================================================================
 
 st.markdown(f"""
@@ -296,8 +242,8 @@ st.markdown("""
 </p>
 """, unsafe_allow_html=True)
 
-# Create two columns: form on left, AI Assistant on right
-col_form, col_assistant = st.columns([2, 1])
+# Create two columns
+col_form, col_debug = st.columns([2, 1])
 
 with col_form:
     st.markdown("### Your Response")
@@ -305,39 +251,33 @@ with col_form:
     # Text area for argumentation
     argumentation = st.text_area(
         "Your argumentation:",
+        value=st.session_state.get("current_text", ""),
         placeholder="Type your explanation here...",
         height=300,
         label_visibility="collapsed",
         key="argumentation_input"
     )
     
-    # Form only for submit button
-    with st.form("final_argumentation_form"):
-        submitted = st.form_submit_button("Submit and Complete", use_container_width=True)
-
-    if submitted:
+    # Traccia il testo corrente
+    st.session_state.current_text = argumentation
+    track_current_text(argumentation)
+    
+    # Submit button
+    if st.button("Submit and Complete", type="primary", use_container_width=True):
         if argumentation.strip():
             st.session_state.final_argumentation = argumentation
+            st.session_state.is_submitted = True
             
-            # Stop tracker
-            if st.session_state.tracker:
-                st.session_state.tracker.stop()
-            
-            # Print final summary to console (for debugging)
+            # Print final summary
             print("\n" + "="*60)
             print("📊 FINAL SUBMISSION:")
             print("="*60)
             print(f"User: {st.session_state.user_info['prolific_id']}")
             print(f"Total words: {len(argumentation.split())}")
             print(f"Seconds tracked: {len(st.session_state.text_tracking)}")
-            print(f"\nText tracking by second:")
-            for timestamp, data in sorted(st.session_state.text_tracking.items()):
-                readable_time = datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
-                print(f"  [{readable_time}] {data['word_count']} words, {data['char_count']} chars")
-                print(f"    Text preview: {data['text'][:50]}...")
             print("="*60 + "\n")
             
-            # Try to save to database
+            # Save to Google Sheets
             if st.session_state.sheet_connected:
                 mock_prompt_data = {
                     "title": "Why not drink during job interview",
@@ -350,7 +290,7 @@ with col_form:
                     st.session_state.selected_prompt_key,
                     mock_prompt_data,
                     argumentation,
-                    st.session_state.text_tracking,  # Passa text_tracking invece di word_tracking
+                    st.session_state.text_tracking,
                     st.session_state.final_chat_messages
                 )
                 
@@ -372,44 +312,45 @@ with col_form:
         else:
             st.markdown("<div class='error'>Please provide an argumentation to continue.</div>", unsafe_allow_html=True)
 
-with col_assistant:
-    st.markdown("### AI Assistant")
+with col_debug:
+    st.markdown("### Debug Info")
     
-    # Display chat messages
-    chat_container = st.container(border=True, height=400)
-    with chat_container:
-        if not st.session_state.final_chat_messages:
-            st.markdown("<p style='color: #999; text-align: center;'>No messages yet. Start a conversation!</p>", unsafe_allow_html=True)
-        else:
-            for message in st.session_state.final_chat_messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-                    st.markdown(f"<div class='timestamp'>{message.get('timestamp', 'N/A')}</div>", unsafe_allow_html=True)
+    current_time = time.time()
+    elapsed = current_time - st.session_state.start_time
     
-    # Chat input
-    if final_chat_prompt := st.chat_input("Ask something...", key="final_chat_input"):
-        # Add user message
-        st.session_state.final_chat_messages.append({
-            "role": "user",
-            "content": final_chat_prompt,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-        
-        # Generate response
-        try:
-            # Mock response (without real API for testing)
-            response_text = f"""This is a response to your question about professional conduct during interviews.
-            
-Drinking during a job interview is generally considered inappropriate because it can affect your professional image, impair your judgment, and show a lack of respect for the interviewer and the opportunity."""
-            response_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            st.session_state.final_chat_messages.append({
-                "role": "assistant",
-                "content": response_text,
-                "timestamp": response_timestamp
-            })
-            
-            st.rerun()
-        
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+    st.markdown(f"""
+    <div class="debug-info">
+        <strong>⏱️ Tracking Status</strong><br>
+        Refresh count: {st.session_state.refresh_count}<br>
+        Elapsed time: {int(elapsed)}s<br>
+        Snapshots: {len(st.session_state.text_tracking)}<br>
+        Current words: {len(argumentation.split())}<br>
+        Current chars: {len(argumentation)}
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Mostra ultimi 5 snapshot
+    if st.session_state.text_tracking:
+        st.markdown("**Last 5 snapshots:**")
+        recent = sorted(st.session_state.text_tracking.items())[-5:]
+        for timestamp, data in recent:
+            readable_time = datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
+            st.markdown(f"`{readable_time}`: {data['word_count']} words")
+
+# ============================================================================
+# AUTO-REFRESH MECHANISM - Forza rerun ogni secondo
+# ============================================================================
+
+if not st.session_state.is_submitted:
+    # Incrementa il counter
+    st.session_state.refresh_count += 1
+    st.session_state.last_refresh = time.time()
+    
+    # Auto-refresh con JavaScript
+    st.markdown("""
+    <script>
+        setTimeout(function() {
+            window.parent.location.reload();
+        }, 1000);
+    </script>
+    """, unsafe_allow_html=True)

@@ -12,7 +12,7 @@ st.set_page_config(
     page_title="Everyday Norm Experiment - Phase 4",
     page_icon="🔬",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # Custom CSS
@@ -65,6 +65,18 @@ st.markdown("""
         font-weight: 500;
     }
     
+    .debug-box {
+        background: #f0f4f8;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #3b82f6;
+        font-family: 'Courier New', monospace;
+        font-size: 0.85rem;
+        max-height: 300px;
+        overflow-y: auto;
+        margin: 1rem 0;
+    }
+    
     [data-testid="chatAvatarIcon-assistant"], [data-testid="chatAvatarIcon-user"] {
         display: none !important;
     }
@@ -82,15 +94,6 @@ st.markdown("""
         line-height: 1.6;
         color: #333;
         font-size: 0.95rem;
-    }
-    
-    [data-testid="stChatMessage"]:has([data-testid="stChatMessageContent"] p) > div:first-child {
-        margin-right: auto;
-        max-width: 85%;
-    }
-    
-    [data-testid="stChatMessage"]:last-child [data-testid="stChatMessageContent"] {
-        background: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%);
     }
     
     [data-testid="stChatInputTextArea"] textarea {
@@ -163,16 +166,13 @@ def init_google_sheets():
 def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, argumentation, content_tracking, final_chat_messages):
     """
     Salva i dati su Google Sheets alla fine della sessione.
-    
-    Args:
-        content_tracking: dict con {timestamp: contenuto_completo, ...}
     """
     try:
         final_chat_json = json.dumps(final_chat_messages or [], ensure_ascii=False, indent=2)
         
-        # Formatta il content tracking
+        # Formatta il content tracking - converti timestamp a string
         content_tracking_formatted = json.dumps(
-            content_tracking,
+            {str(k): v for k, v in content_tracking.items()},
             ensure_ascii=False,
             indent=2
         )
@@ -182,7 +182,7 @@ def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, argumentati
             prompt_key,
             prompt_data["title"],
             argumentation,
-            content_tracking_formatted,  # Tutto il tracking del contenuto
+            content_tracking_formatted,
             final_chat_json,
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ])
@@ -202,10 +202,13 @@ class ContentTracker(threading.Thread):
         self.session_state = session_state
         self.is_running = False
         self.last_saved_second = None
+        self.updates_count = 0
     
     def run(self):
         """Loop in background che traccia il contenuto completo ogni secondo"""
         self.is_running = True
+        print("✅ ContentTracker thread started")
+        
         while self.is_running:
             try:
                 current_time = time.time()
@@ -217,23 +220,25 @@ class ContentTracker(threading.Thread):
                     
                     # Salva il contenuto COMPLETO per questo secondo
                     self.session_state.content_tracking[current_second] = content
+                    self.updates_count += 1
                     
-                    # Log silenzioso
+                    # Log
                     readable_time = datetime.fromtimestamp(current_second).strftime("%H:%M:%S")
                     word_count = len(content.split()) if content.strip() else 0
-                    print(f"[{readable_time}] Tracked content: {word_count} words | '{content[:50]}...'")
+                    print(f"💾 [{readable_time}] Update #{self.updates_count}: {word_count} words")
                     
                     self.last_saved_second = current_second
                 
-                time.sleep(0.05)  # Check every 50ms
+                time.sleep(0.05)
             
             except Exception as e:
-                print(f"Tracker error: {str(e)}")
+                print(f"❌ Tracker error: {str(e)}")
                 time.sleep(1)
     
     def stop(self):
         """Ferma il tracker"""
         self.is_running = False
+        print(f"⏹️ ContentTracker stopped after {self.updates_count} updates")
 
 
 # Initialize session state
@@ -242,7 +247,7 @@ if "final_argumentation" not in st.session_state:
 if "final_chat_messages" not in st.session_state:
     st.session_state.final_chat_messages = []
 if "content_tracking" not in st.session_state:
-    st.session_state.content_tracking = {}  # {timestamp: contenuto_completo}
+    st.session_state.content_tracking = {}
 if "user_info" not in st.session_state:
     st.session_state.user_info = {
         "prolific_id": "TEST_USER_001",
@@ -254,8 +259,6 @@ if "tracker" not in st.session_state:
     st.session_state.tracker = None
 if "selected_prompt_key" not in st.session_state:
     st.session_state.selected_prompt_key = "norm_test"
-if "app_start_time" not in st.session_state:
-    st.session_state.app_start_time = datetime.now()
 
 # Tentare la connessione a Google Sheets
 sheet, is_connected = init_google_sheets()
@@ -267,7 +270,62 @@ if st.session_state.tracker is None:
     st.session_state.tracker.start()
 
 # ============================================================================
-# UI - Pulita e semplice
+# SIDEBAR - DEBUG INFO
+# ============================================================================
+
+with st.sidebar:
+    st.header("🔍 DEBUG INFO")
+    
+    st.markdown("### 📊 Tracking Status")
+    if st.session_state.tracker and st.session_state.tracker.is_running:
+        st.success("✅ Tracker RUNNING")
+    else:
+        st.error("❌ Tracker STOPPED")
+    
+    st.metric("Seconds Tracked", len(st.session_state.content_tracking))
+    st.metric("Database Connected", "✅ Yes" if st.session_state.sheet_connected else "❌ No")
+    
+    st.markdown("### 📋 Current Tracking")
+    if st.session_state.content_tracking:
+        # Mostra gli ultimi 5 update
+        recent = dict(sorted(st.session_state.content_tracking.items())[-5:])
+        st.write("**Last 5 updates:**")
+        for ts, content in recent.items():
+            readable_time = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+            word_count = len(content.split()) if content.strip() else 0
+            st.write(f"🔹 `{readable_time}` → **{word_count}** words")
+    else:
+        st.write("❌ No tracking data yet")
+    
+    st.markdown("---")
+    
+    st.markdown("### 👤 User Info")
+    prolific_id = st.text_input(
+        "Prolific ID",
+        value=st.session_state.user_info["prolific_id"],
+        key="sidebar_prolific_id"
+    )
+    st.session_state.user_info["prolific_id"] = prolific_id
+    
+    st.markdown("---")
+    
+    # Export tracking come JSON
+    if st.session_state.content_tracking:
+        st.markdown("### 📥 Export")
+        tracking_json = json.dumps(
+            {str(k): v for k, v in st.session_state.content_tracking.items()},
+            ensure_ascii=False,
+            indent=2
+        )
+        st.download_button(
+            "📥 Download Tracking JSON",
+            data=tracking_json,
+            file_name=f"tracking_{st.session_state.user_info['prolific_id']}.json",
+            mime="application/json"
+        )
+
+# ============================================================================
+# MAIN UI
 # ============================================================================
 
 st.markdown(f"""
@@ -300,6 +358,13 @@ with col_form:
         key="argumentation_input"
     )
     
+    # Debug: mostra il contenuto attuale
+    with st.expander("🔍 Debug - Current Form Content"):
+        current_content = st.session_state.get("argumentation_input", "")
+        st.write(f"**Length:** {len(current_content)} characters")
+        st.write(f"**Words:** {len(current_content.split()) if current_content.strip() else 0}")
+        st.write(f"**Content:** `{current_content}`")
+    
     # Form only for submit button
     with st.form("final_argumentation_form"):
         submitted = st.form_submit_button("Submit and Complete", use_container_width=True)
@@ -312,19 +377,19 @@ with col_form:
             if st.session_state.tracker:
                 st.session_state.tracker.stop()
             
-            # Print final summary to console (for debugging)
-            print("\n" + "="*60)
+            # Print final summary
+            print("\n" + "="*80)
             print("📊 FINAL SUBMISSION:")
-            print("="*60)
+            print("="*80)
             print(f"User: {st.session_state.user_info['prolific_id']}")
             print(f"Total words: {len(argumentation.split())}")
-            print(f"Seconds tracked: {len(st.session_state.content_tracking)}")
-            print(f"\nContent tracking by second:")
+            print(f"Total seconds tracked: {len(st.session_state.content_tracking)}")
+            print(f"\nContent tracking ({len(st.session_state.content_tracking)} entries):")
             for timestamp, content in sorted(st.session_state.content_tracking.items()):
                 readable_time = datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
                 word_count = len(content.split()) if content.strip() else 0
-                print(f"  [{readable_time}] {word_count} words | Content: '{content[:60]}...'")
-            print("="*60 + "\n")
+                print(f"  [{readable_time}] {word_count:2d} words | '{content}'")
+            print("="*80 + "\n")
             
             # Try to save to database
             if st.session_state.sheet_connected:
@@ -339,7 +404,7 @@ with col_form:
                     st.session_state.selected_prompt_key,
                     mock_prompt_data,
                     argumentation,
-                    st.session_state.content_tracking,  # Passa il tracking del contenuto
+                    st.session_state.content_tracking,
                     st.session_state.final_chat_messages
                 )
                 
@@ -355,7 +420,7 @@ with col_form:
             else:
                 st.markdown("""
                     <div class='error'>
-                        ❌ Database connection error. Please contact the researcher.
+                        ❌ Database connection error. Contact support.
                     </div>
                 """, unsafe_allow_html=True)
         else:
@@ -364,41 +429,30 @@ with col_form:
 with col_assistant:
     st.markdown("### AI Assistant")
     
-    # Display chat messages
     chat_container = st.container(border=True, height=400)
     with chat_container:
         if not st.session_state.final_chat_messages:
-            st.markdown("<p style='color: #999; text-align: center;'>No messages yet. Start a conversation!</p>", unsafe_allow_html=True)
+            st.markdown("<p style='color: #999; text-align: center;'>No messages yet</p>", unsafe_allow_html=True)
         else:
             for message in st.session_state.final_chat_messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
                     st.markdown(f"<div class='timestamp'>{message.get('timestamp', 'N/A')}</div>", unsafe_allow_html=True)
     
-    # Chat input
     if final_chat_prompt := st.chat_input("Ask something...", key="final_chat_input"):
-        # Add user message
         st.session_state.final_chat_messages.append({
             "role": "user",
             "content": final_chat_prompt,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         })
         
-        # Generate response
-        try:
-            # Mock response
-            response_text = f"""This is a response to your question about professional conduct during interviews.
-            
-Drinking during a job interview is generally considered inappropriate because it can affect your professional image, impair your judgment, and show a lack of respect for the interviewer and the opportunity."""
-            response_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            st.session_state.final_chat_messages.append({
-                "role": "assistant",
-                "content": response_text,
-                "timestamp": response_timestamp
-            })
-            
-            st.rerun()
+        response_text = "This is a response about professional conduct during interviews."
+        response_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+        st.session_state.final_chat_messages.append({
+            "role": "assistant",
+            "content": response_text,
+            "timestamp": response_timestamp
+        })
+        
+        st.rerun()

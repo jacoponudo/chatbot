@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS (same as main app)
+# Custom CSS
 st.markdown("""
 <style>
     * {
@@ -65,60 +65,6 @@ st.markdown("""
         font-weight: 500;
     }
     
-    [data-testid="chatAvatarIcon-assistant"], [data-testid="chatAvatarIcon-user"] {
-        display: none !important;
-    }
-    
-    [role="presentation"] [data-testid="stChatMessage"] {
-        background: transparent !important;
-        padding: 1rem 0 !important;
-    }
-    
-    [data-testid="stChatMessageContent"] {
-        background: white;
-        padding: 1.25rem 1.5rem;
-        border-radius: 10px;
-        border: 1px solid #e5e7eb;
-        line-height: 1.6;
-        color: #333;
-        font-size: 0.95rem;
-    }
-    
-    [data-testid="stChatMessage"]:has([data-testid="stChatMessageContent"] p) > div:first-child {
-        margin-right: auto;
-        max-width: 85%;
-    }
-    
-    [data-testid="stChatMessage"]:last-child [data-testid="stChatMessageContent"] {
-        background: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%);
-    }
-    
-    [data-testid="stChatInputTextArea"] textarea {
-        border: 1.5px solid #e5e7eb !important;
-        border-radius: 8px !important;
-        padding: 1rem !important;
-        font-size: 0.95rem !important;
-    }
-    
-    [data-testid="stChatInputTextArea"] textarea:focus {
-        border-color: #003d82 !important;
-        box-shadow: 0 0 0 3px rgba(0, 61, 130, 0.1) !important;
-    }
-    
-    .chat-container {
-        background: white;
-        border-radius: 12px;
-        padding: 2rem;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-    }
-    
-    hr {
-        border: none;
-        border-top: 1px solid #e5e7eb;
-        margin: 2rem 0;
-    }
-    
     .error {
         background: #fef2f2;
         color: #991b1b;
@@ -137,18 +83,6 @@ st.markdown("""
         font-size: 0.95rem;
     }
     
-    .info-text {
-        color: #666;
-        font-size: 0.9rem;
-        margin-top: 1rem;
-    }
-    
-    .timestamp {
-        font-size: 0.8rem;
-        color: #999;
-        margin-top: 0.5rem;
-    }
-    
     [data-testid="stTextArea"] textarea {
         border: 1.5px solid #e5e7eb !important;
         border-radius: 8px !important;
@@ -161,12 +95,6 @@ st.markdown("""
         border-color: #003d82 !important;
         box-shadow: 0 0 0 3px rgba(0, 61, 130, 0.1) !important;
     }
-    
-    @media (max-width: 1200px) {
-        .final-phase-container {
-            flex-direction: column;
-        }
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -177,19 +105,6 @@ st.markdown("""
 def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, messages, argumentation, word_tracking=None, final_chat_messages=None):
     """
     Salva i dati su Google Sheets.
-    
-    Args:
-        sheet: Sheet object di gspread
-        user_info (dict): Informazioni dell'utente
-        prompt_key (str): Chiave del prompt selezionato
-        prompt_data (dict): Dati del prompt
-        messages (list): Lista dei messaggi
-        argumentation (str): Testo dell'argomentazione finale
-        word_tracking (dict): Tracking delle parole per secondo
-        final_chat_messages (list): Messaggi della chat finale
-    
-    Returns:
-        bool: True se il salvataggio è riuscito, False altrimenti
     """
     try:
         conversation_json = json.dumps(messages, ensure_ascii=False, indent=2)
@@ -198,6 +113,7 @@ def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, messages, a
         # Formatta il word tracking in modo leggibile
         word_tracking_formatted = ""
         if word_tracking:
+            # Ordina per timestamp per una sequenza cronologica
             sorted_tracking = sorted(word_tracking.items())
             word_tracking_formatted = json.dumps(
                 {f"second_{i}": count for i, count in sorted_tracking},
@@ -282,9 +198,9 @@ if "final_argumentation" not in st.session_state:
 if "final_chat_messages" not in st.session_state:
     st.session_state.final_chat_messages = []
 if "word_tracking" not in st.session_state:
-    st.session_state.word_tracking = defaultdict(int)
-if "last_check_time" not in st.session_state:
-    st.session_state.last_check_time = time.time()
+    st.session_state.word_tracking = {}  # Dict con timestamp come chiave
+if "last_tracked_second" not in st.session_state:
+    st.session_state.last_tracked_second = None
 if "user_info" not in st.session_state:
     st.session_state.user_info = {
         "prolific_id": "TEST_USER_001",
@@ -340,15 +256,15 @@ with st.sidebar:
     st.markdown("### 📊 Current State")
     st.json({
         "Prolific ID": st.session_state.user_info["prolific_id"],
-        "Final Argumentation": st.session_state.final_argumentation[:50] + "..." if st.session_state.final_argumentation else None,
+        "Final Argumentation Words": len(st.session_state.final_argumentation.split()) if st.session_state.final_argumentation else 0,
         "Chat Messages Count": len(st.session_state.final_chat_messages),
-        "Word Tracking Entries": len(st.session_state.word_tracking)
+        "Word Tracking Seconds": len(st.session_state.word_tracking)
     })
 
 # Main content
 st.markdown(f"""
 <div class="success-badge">
-    Testing Phase 4 - Final Argumentation Form + Lateral Chat (with Database Save)
+    Testing Phase 4 - Word Tracking con Granularità al Secondo
 </div>
 """, unsafe_allow_html=True)
 
@@ -364,15 +280,42 @@ st.markdown("""
 # Create two columns: form on left, AI Assistant on right
 col_form, col_assistant = st.columns([2, 1])
 
-def track_words_callback():
-    """Callback silenzioso che traccia le parole ogni secondo"""
+# PLACEHOLDER per il tracciamento ogni secondo
+placeholder_tracking = st.empty()
+
+def track_words_every_second():
+    """
+    Traccia il numero di parole OGNI SECONDO.
+    Ogni secondo che passa, registra quante parole sono presenti nel text area.
+    """
     current_time = time.time()
-    current_text = st.session_state.get("argumentation_input", "")
-    word_count = len(current_text.split()) if current_text.strip() else 0
+    current_second = int(current_time)  # Timestamp arrotondato al secondo
     
-    second_bucket = int(current_time)
-    st.session_state.word_tracking[second_bucket] = word_count
-    st.session_state.last_check_time = current_time
+    # Leggi il testo attuale
+    current_text = st.session_state.get("argumentation_input", "")
+    current_word_count = len(current_text.split()) if current_text.strip() else 0
+    
+    # Se non abbiamo ancora tracciato questo secondo, registralo
+    if current_second not in st.session_state.word_tracking:
+        st.session_state.word_tracking[current_second] = current_word_count
+        
+        # Debug: mostra nel terminale
+        print(f"⏱️ [{datetime.fromtimestamp(current_second).strftime('%H:%M:%S')}] Parole registrate al secondo {current_second}: {current_word_count}")
+    else:
+        # Aggiorna il conteggio per questo secondo (nel caso in cui sia stato riaperto)
+        st.session_state.word_tracking[current_second] = current_word_count
+    
+    # Mostra il tracking corrente
+    sorted_tracking = sorted(st.session_state.word_tracking.items())
+    tracking_display = {f"second_{int(ts)}": count for ts, count in sorted_tracking}
+    
+    with placeholder_tracking:
+        st.markdown(f"""
+        <div style='background: #f0f4f8; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;'>
+            <strong>📊 Real-time Word Tracking (per second):</strong><br>
+            <code>{json.dumps(tracking_display, indent=2)}</code>
+        </div>
+        """, unsafe_allow_html=True)
 
 with col_form:
     st.markdown("### Your Response")
@@ -384,8 +327,11 @@ with col_form:
         height=300,
         label_visibility="collapsed",
         key="argumentation_input",
-        on_change=track_words_callback
+        on_change=track_words_every_second
     )
+    
+    # Aggiorna il tracking ogni volta che l'utente digita
+    track_words_every_second()
     
     # Form only for submit button
     with st.form("final_argumentation_form"):
@@ -395,13 +341,23 @@ with col_form:
         if argumentation.strip():
             st.session_state.final_argumentation = argumentation
             
-            # Final tracking
-            track_words_callback()
+            # Tracciamento finale al momento del submit
+            track_words_every_second()
             
-            # Print tracking
-            print("📊 WORD TRACKING PER SECONDO:")
+            st.markdown(f"""
+            <div class="success-badge">
+                ✅ Argumentation saved! ({len(argumentation.split())} words)
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Print tracking to console
+            print("\n" + "="*60)
+            print("📊 FINAL WORD TRACKING BY SECOND:")
+            print("="*60)
             for second, word_count in sorted(st.session_state.word_tracking.items()):
-                print(f"  Secondo {second}: {word_count} parole")
+                readable_time = datetime.fromtimestamp(second).strftime("%H:%M:%S")
+                print(f"  [{readable_time}] Second {second}: {word_count} words")
+            print("="*60 + "\n")
             
             # Try to save to database
             if st.session_state.sheet_connected:
@@ -422,7 +378,7 @@ with col_form:
                     mock_prompt_data,
                     mock_messages,
                     argumentation,
-                    word_tracking=dict(st.session_state.word_tracking),
+                    word_tracking=st.session_state.word_tracking,
                     final_chat_messages=st.session_state.final_chat_messages
                 )
                 
@@ -455,10 +411,14 @@ with col_form:
             st.markdown("### 📋 Response Summary")
             st.write(f"**Word count:** {len(argumentation.split())} words")
             st.write(f"**Character count:** {len(argumentation)} characters")
+            st.write(f"**Seconds tracked:** {len(st.session_state.word_tracking)} seconds")
             
-            # Show word tracking
-            with st.expander("📊 Word Tracking by Second"):
-                tracking_data = dict(sorted(st.session_state.word_tracking.items()))
+            # Show detailed word tracking
+            with st.expander("📊 Detailed Word Tracking by Second"):
+                tracking_data = {}
+                for ts, count in sorted(st.session_state.word_tracking.items()):
+                    readable_time = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+                    tracking_data[f"{readable_time} (ts:{ts})"] = count
                 st.json(tracking_data)
         else:
             st.markdown("<div class='error'>Please provide an argumentation to continue.</div>", unsafe_allow_html=True)
@@ -475,7 +435,6 @@ with col_assistant:
             for message in st.session_state.final_chat_messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
-                    st.markdown(f"<div class='timestamp'>{message.get('timestamp', 'N/A')}</div>", unsafe_allow_html=True)
     
     # Chat input
     if final_chat_prompt := st.chat_input("Ask something...", key="final_chat_input"):
@@ -492,8 +451,7 @@ with col_assistant:
                 # Mock response for testing
                 response_text = f"""This is a mock response to your question: "{final_chat_prompt[:50]}..."
                 
-In a real scenario, the AI would provide a thoughtful response about why drinking during a job interview is inappropriate. 
-This could include points about professionalism, respect for the interviewer, health and safety considerations, etc."""
+In a real scenario, the AI would provide a thoughtful response about why drinking during a job interview is inappropriate."""
                 response_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             else:
                 # Real OpenAI API
@@ -541,8 +499,11 @@ with col1:
         session_data = {
             "user_info": st.session_state.user_info,
             "final_argumentation": st.session_state.final_argumentation,
-            "final_chat_messages": st.session_state.final_chat_messages,
-            "word_tracking": dict(st.session_state.word_tracking),
+            "word_tracking": st.session_state.word_tracking,
+            "word_tracking_readable": {
+                datetime.fromtimestamp(ts).strftime("%H:%M:%S"): count 
+                for ts, count in sorted(st.session_state.word_tracking.items())
+            },
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         st.json(session_data)
@@ -560,8 +521,7 @@ with col2:
     if st.button("🔄 Reset All Data", use_container_width=True):
         st.session_state.final_argumentation = None
         st.session_state.final_chat_messages = []
-        st.session_state.word_tracking = defaultdict(int)
-        st.session_state.last_check_time = time.time()
+        st.session_state.word_tracking = {}
         st.success("✅ All data reset!")
         st.rerun()
 
@@ -570,8 +530,8 @@ with st.expander("🔍 Full Session State (Debug Info)"):
     debug_data = {
         "user_info": st.session_state.user_info,
         "final_argumentation_length": len(st.session_state.final_argumentation) if st.session_state.final_argumentation else 0,
-        "final_chat_messages_count": len(st.session_state.final_chat_messages),
-        "word_tracking": dict(st.session_state.word_tracking),
+        "word_tracking_entries": len(st.session_state.word_tracking),
+        "word_tracking_data": st.session_state.word_tracking,
         "sheet_connected": st.session_state.sheet_connected
     }
     st.json(debug_data)

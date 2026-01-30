@@ -234,8 +234,6 @@ def load_prompts_from_file(file_path="prompts.json"):
         # Carica il file JSON
         with open(file_path, 'r', encoding='utf-8') as f:
             prompts = json.load(f)
-        
-        st.success(f"✅ Prompt caricati con successo da {file_path}")
         return prompts
     
     except json.JSONDecodeError as e:

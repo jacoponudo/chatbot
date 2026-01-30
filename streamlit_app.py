@@ -535,8 +535,7 @@ try:
             # Stream response
             with st.chat_message("assistant"):
                 response = st.write_stream(stream)
-
-            # Check if conversation should end (LLM responds with ABRACADABRA)
+                        # Check if conversation should end (LLM responds with ABRACADABRA)
             if "ABRACADABRA" in response:
                 st.session_state.conversation_ended = True
                 st.rerun()
@@ -576,7 +575,7 @@ try:
         final_chat_system_prompt = "You are a helpful assistant. Answer questions about the topic discussed: why it's not correct to drink during a job interview. Be supportive and provide insights."
         
         # Create two columns: form on left, AI Assistant on right
-        col_form, col_assistant = st.columns([2, 1])
+        col_form, col_assistant = st.columns([4, 1])
         
         with col_form:
             st.markdown("### Your Response")
@@ -610,13 +609,14 @@ try:
                         if success:
                             st.markdown("""
                             <div class="success-badge">
-                                ✅ Thank you for your participation! Your responses have been recorded.
+                                ✅ Thank you for your participation! Your responses have been recorded. 
                             </div>
                             """, unsafe_allow_html=True)
                             
                             st.markdown("""
                             <p style='color: #666; margin-top: 2rem; font-size: 0.95rem;'>
                                 Your data has been saved and will be used for research purposes only.
+                                That is your participation TOKEN: CARISSIMO.54
                             </p>
                             """, unsafe_allow_html=True)
                     else:

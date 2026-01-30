@@ -104,6 +104,11 @@ st.markdown("""
         text-align: center;
         margin-bottom: 1rem;
     }
+    
+    /* Nascondi il bottone di auto-save */
+    button[kind="secondary"] {
+        display: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -204,38 +209,6 @@ sheet, is_connected = init_google_sheets()
 st.session_state.sheet_connected = is_connected
 
 # ============================================================================
-# TRACKING LOGIC - AUTOMATIC SAVE OGNI SECONDO
-# ============================================================================
-
-def auto_save_text():
-    """Salva automaticamente il testo corrente ogni secondo"""
-    current_time = time.time()
-    elapsed_since_last_save = current_time - st.session_state.last_save_time
-    
-    # Salva ogni secondo
-    if elapsed_since_last_save >= 1.0 and not st.session_state.is_submitted:
-        current_second = int(current_time)
-        text_content = st.session_state.current_text
-        
-        word_count = len(text_content.split()) if text_content.strip() else 0
-        char_count = len(text_content)
-        
-        # Salva snapshot
-        st.session_state.text_tracking[current_second] = {
-            "text": text_content,
-            "word_count": word_count,
-            "char_count": char_count
-        }
-        
-        st.session_state.last_save_time = current_time
-        
-        readable_time = datetime.fromtimestamp(current_second).strftime("%H:%M:%S")
-        print(f"💾 [{readable_time}] Auto-saved: {word_count} words, {char_count} chars")
-        
-        return True
-    return False
-
-# ============================================================================
 # UI
 # ============================================================================
 
@@ -271,93 +244,131 @@ with col_form:
     
     st.markdown("### Your Response")
     
-    # Text area for argumentation
-    argumentation = st.text_area(
-        "Your argumentation:",
-        value=st.session_state.current_text,
-        placeholder="Type your explanation here...",
-        height=300,
-        label_visibility="collapsed",
-        key="argumentation_input"
-    )
-    
-    # Aggiorna il testo corrente nel session state
-    st.session_state.current_text = argumentation
-    
-    # Submit button
-    if st.button("Submit and Complete", type="primary", use_container_width=True):
-        if argumentation.strip():
-            st.session_state.final_argumentation = argumentation
-            st.session_state.is_submitted = True
-            
-            # Salva l'ultimo snapshot prima del submit
+    # Form con auto-submit ogni secondo
+    with st.form(key="auto_submit_form", clear_on_submit=False):
+        # Text area for argumentation
+        argumentation = st.text_area(
+            "Your argumentation:",
+            value=st.session_state.current_text,
+            placeholder="Type your explanation here...",
+            height=300,
+            label_visibility="collapsed",
+            key="argumentation_input"
+        )
+        
+        # Due bottoni: uno invisibile per auto-submit, uno visibile per submit finale
+        col_auto, col_final = st.columns([1, 1])
+        
+        with col_auto:
+            # Questo viene triggerato automaticamente ogni secondo
+            auto_submitted = st.form_submit_button(
+                "Auto-save (hidden)", 
+                use_container_width=True,
+                type="secondary"
+            )
+        
+        with col_final:
+            # Questo è il submit finale dell'utente
+            final_submitted = st.form_submit_button(
+                "Submit and Complete", 
+                use_container_width=True,
+                type="primary"
+            )
+        
+        # Gestisci auto-submit (ogni secondo)
+        if auto_submitted and not st.session_state.is_submitted:
+            st.session_state.current_text = argumentation
             current_second = int(time.time())
+            
+            word_count = len(argumentation.split()) if argumentation.strip() else 0
+            char_count = len(argumentation)
+            
             st.session_state.text_tracking[current_second] = {
                 "text": argumentation,
-                "word_count": len(argumentation.split()),
-                "char_count": len(argumentation)
+                "word_count": word_count,
+                "char_count": char_count
             }
             
-            # Print final summary
-            print("\n" + "="*60)
-            print("📊 FINAL SUBMISSION:")
-            print("="*60)
-            print(f"User: {st.session_state.user_info['prolific_id']}")
-            print(f"Total words: {len(argumentation.split())}")
-            print(f"Total time: {elapsed_time}s")
-            print(f"Snapshots saved: {len(st.session_state.text_tracking)}")
-            print("="*60 + "\n")
-            
-            # Save to Google Sheets
-            if st.session_state.sheet_connected:
-                mock_prompt_data = {
-                    "title": "Why not drink during job interview",
-                    "description": "Professional conduct discussion"
+            readable_time = datetime.fromtimestamp(current_second).strftime("%H:%M:%S")
+            print(f"💾 [{readable_time}] Auto-saved: {word_count} words, {char_count} chars")
+        
+        # Gestisci submit finale
+        if final_submitted:
+            if argumentation.strip():
+                st.session_state.final_argumentation = argumentation
+                st.session_state.is_submitted = True
+                st.session_state.current_text = argumentation
+                
+                # Salva l'ultimo snapshot prima del submit
+                current_second = int(time.time())
+                st.session_state.text_tracking[current_second] = {
+                    "text": argumentation,
+                    "word_count": len(argumentation.split()),
+                    "char_count": len(argumentation)
                 }
                 
-                success = save_to_google_sheets(
-                    sheet,
-                    st.session_state.user_info,
-                    st.session_state.selected_prompt_key,
-                    mock_prompt_data,
-                    argumentation,
-                    st.session_state.text_tracking,
-                    st.session_state.final_chat_messages
-                )
+                # Print final summary
+                print("\n" + "="*60)
+                print("📊 FINAL SUBMISSION:")
+                print("="*60)
+                print(f"User: {st.session_state.user_info['prolific_id']}")
+                print(f"Total words: {len(argumentation.split())}")
+                print(f"Total time: {elapsed_time}s")
+                print(f"Snapshots saved: {len(st.session_state.text_tracking)}")
+                print("="*60 + "\n")
                 
-                if success:
+                # Save to Google Sheets
+                if st.session_state.sheet_connected:
+                    mock_prompt_data = {
+                        "title": "Why not drink during job interview",
+                        "description": "Professional conduct discussion"
+                    }
+                    
+                    success = save_to_google_sheets(
+                        sheet,
+                        st.session_state.user_info,
+                        st.session_state.selected_prompt_key,
+                        mock_prompt_data,
+                        argumentation,
+                        st.session_state.text_tracking,
+                        st.session_state.final_chat_messages
+                    )
+                    
+                    if success:
+                        st.markdown("""
+                            <div class="success-badge">
+                                ✅ Thank you for your participation! Your responses have been recorded.
+                            </div>
+                        """, unsafe_allow_html=True)
+                        print("✅ Data saved to Google Sheets")
+                    else:
+                        st.markdown("<div class='error'>❌ Error saving data. Please try again.</div>", unsafe_allow_html=True)
+                else:
                     st.markdown("""
-                        <div class="success-badge">
-                            ✅ Thank you for your participation! Your responses have been recorded.
+                        <div class='error'>
+                            ❌ Database connection error. Please contact the researcher.
                         </div>
                     """, unsafe_allow_html=True)
-                    print("✅ Data saved to Google Sheets")
-                else:
-                    st.markdown("<div class='error'>❌ Error saving data. Please try again.</div>", unsafe_allow_html=True)
             else:
-                st.markdown("""
-                    <div class='error'>
-                        ❌ Database connection error. Please contact the researcher.
-                    </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.markdown("<div class='error'>Please provide an argumentation to continue.</div>", unsafe_allow_html=True)
+                st.markdown("<div class='error'>Please provide an argumentation to continue.</div>", unsafe_allow_html=True)
 
 with col_debug:
     st.markdown("### Debug Info")
     
     current_time = time.time()
     elapsed = current_time - st.session_state.start_time
-    time_since_save = current_time - st.session_state.last_save_time
+    
+    # Calcola le parole dal testo corrente
+    current_words = len(st.session_state.current_text.split()) if st.session_state.current_text.strip() else 0
+    current_chars = len(st.session_state.current_text)
     
     st.markdown(f"""
     <div class="debug-info">
         <strong>⏱️ Tracking Status</strong><br>
         Total time: {int(elapsed)}s<br>
-        Since last save: {time_since_save:.1f}s<br>
         Total snapshots: {len(st.session_state.text_tracking)}<br>
-        Current words: {len(argumentation.split())}<br>
-        Current chars: {len(argumentation)}<br>
+        Current words: {current_words}<br>
+        Current chars: {current_chars}<br>
         Status: {'✅ Submitted' if st.session_state.is_submitted else '🔄 Active'}
     </div>
     """, unsafe_allow_html=True)
@@ -371,13 +382,20 @@ with col_debug:
             st.markdown(f"`{readable_time}`: {data['word_count']} words, {data['char_count']} chars")
 
 # ============================================================================
-# AUTO-SAVE MECHANISM - Esegui il salvataggio automatico
+# AUTO-SUBMIT MECHANISM - Trigera il form automaticamente ogni secondo
 # ============================================================================
 
 if not st.session_state.is_submitted:
-    # Prova a salvare (se è passato almeno 1 secondo)
-    was_saved = auto_save_text()
-    
-    # Forza il rerun dopo 1 secondo usando st.rerun() con timer
-    time.sleep(0.1)  # Piccolo delay per evitare loop troppo veloci
-    st.rerun()
+    # JavaScript che clicca automaticamente il bottone di auto-save ogni secondo
+    st.markdown("""
+    <script>
+        // Attendi che la pagina sia caricata
+        setTimeout(function() {
+            // Trova il primo submit button (quello di auto-save)
+            const buttons = window.parent.document.querySelectorAll('button[kind="secondary"]');
+            if (buttons.length > 0) {
+                buttons[0].click();
+            }
+        }, 1000);
+    </script>
+    """, unsafe_allow_html=True)

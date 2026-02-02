@@ -556,6 +556,8 @@ try:
         with col2:
             if st.button("← Change Norm", key="change_norm"):
                 st.session_state.norm_selected = False
+                st.session_state.messages = []
+                st.session_state.greeting_sent = False
                 st.rerun()
         
         st.markdown("<hr>", unsafe_allow_html=True)
@@ -563,8 +565,9 @@ try:
         # Create OpenAI client
         openai_client = OpenAI(api_key=openai_api_key)
         
-        # Get the system prompt for the selected topic
-        system_prompt = prompt_data["system_prompt"]
+        # Get the system prompt template and inject the selected norm
+        system_prompt_template = prompt_data.get("system_prompt_template", prompt_data.get("system_prompt", ""))
+        system_prompt = system_prompt_template.replace("{NORM_DESCRIPTION}", norm_data["description"])
         
         # Generate initial greeting if not yet sent
         if not st.session_state.greeting_sent:

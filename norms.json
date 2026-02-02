@@ -1,38 +1,32 @@
 {
   "norm_1": {
-    "title": "Talking in a library"
+    "title": "Crying in public parks",
+    "description": "",
+    "question": ""
   },
   "norm_2": {
-    "title": "Talking at the workplace"
+    "title": "Drinking during a job interview",
+    "description": "",
+    "question": ""
   },
   "norm_3": {
-    "title": "Eating during a job interview"
+    "title": "Using phone during dinner",
+    "description": "",
+    "question": ""
   },
   "norm_4": {
-    "title": "Eating in a park"
+    "title": "Interrupting someone speaking",
+    "description": "",
+    "question": ""
   },
   "norm_5": {
-    "title": "Talking on the phone at the movies"
+    "title": "Arriving late to appointments",
+    "description": "",
+    "question": ""
   },
   "norm_6": {
-    "title": "Talking on the phone on the sidewalk"
-  },
-  "norm_7": {
-    "title": "Listening to earphones at a funeral"
-  },
-  "norm_8": {
-    "title": "Listening to earphones on the sidewalk"
-  },
-  "norm_9": {
-    "title": "Talking at a funeral"
-  },
-  "norm_10": {
-    "title": "Eating on a bus"
-  },
-  "norm_11": {
-    "title": "Talking on the phone in a restaurant"
-  },
-  "norm_12": {
-    "title": "Listening to earphones at a party"
+    "title": "Loud talking in libraries",
+    "description": "",
+    "question": ""
   }
 }

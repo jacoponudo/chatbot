@@ -249,48 +249,51 @@ st.markdown("""
 
 
 # ============================================================================
-# CARICAMENTO PROMPTS DA FILE JSON ESTERNO
+# CARICAMENTO PROMPTS E NORMS DA FILE JSON ESTERNO
 # ============================================================================
-def load_prompts_from_file(file_path="prompts.json"):
+def load_json_from_file(file_path, item_name="items"):
     """
-    Carica i prompt da un file JSON esterno.
+    Carica dati da un file JSON esterno.
     
     Args:
-        file_path (str): Percorso del file JSON (default: "prompts.json")
+        file_path (str): Percorso del file JSON
+        item_name (str): Nome degli item da caricare (per messaggi di errore)
     
     Returns:
-        dict: Dizionario con i prompt caricati, oppure vuoto se errore
+        dict: Dizionario con i dati caricati, oppure vuoto se errore
     """
     try:
         if not os.path.exists(file_path):
-            st.error(f"❌ File prompts.json non trovato in {file_path}")
+            st.error(f"❌ File {file_path} non trovato")
             return {}
         
         with open(file_path, 'r', encoding='utf-8') as f:
-            prompts = json.load(f)
-        return prompts
+            data = json.load(f)
+        return data
     
     except json.JSONDecodeError as e:
-        st.error(f"❌ Errore nel parsing del JSON: {str(e)}")
+        st.error(f"❌ Errore nel parsing del JSON {file_path}: {str(e)}")
         return {}
     except Exception as e:
-        st.error(f"❌ Errore nel caricamento del file: {str(e)}")
+        st.error(f"❌ Errore nel caricamento del file {file_path}: {str(e)}")
         return {}
 
 
-PROMPTS = load_prompts_from_file("prompts.json")
+PROMPTS = load_json_from_file("prompts.json", "prompts")
+NORMS = load_json_from_file("norms.json", "norms")
 
 
 # ============================================================================
 # SALVATAGGIO CONVERSAZIONE IN JSON
 # ============================================================================
-def save_conversation_to_json(user_info, prompt_data, messages, filename=None):
+def save_conversation_to_json(user_info, prompt_data, norm_data, messages, filename=None):
     """
     Salva la conversazione in un file JSON.
     
     Args:
         user_info (dict): Informazioni dell'utente
         prompt_data (dict): Dati del prompt selezionato
+        norm_data (dict): Dati della norma selezionata
         messages (list): Lista dei messaggi della conversazione
         filename (str): Nome del file (default: generato automaticamente)
     """
@@ -304,6 +307,8 @@ def save_conversation_to_json(user_info, prompt_data, messages, filename=None):
                 "prolific_id": user_info['prolific_id'],
                 "prompt_title": prompt_data['title'],
                 "prompt_description": prompt_data['description'],
+                "norm_title": norm_data['title'],
+                "norm_description": norm_data['description'],
                 "start_date": user_info['start_date'],
                 "end_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "total_messages": len(messages)
@@ -324,7 +329,7 @@ def save_conversation_to_json(user_info, prompt_data, messages, filename=None):
 # ============================================================================
 # SALVATAGGIO SU GOOGLE SHEETS
 # ============================================================================
-def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, messages, argumentation, word_tracking=None, final_chat_messages=None):
+def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, norm_key, norm_data, messages, argumentation, word_tracking=None, final_chat_messages=None):
     """
     Salva i dati su Google Sheets.
     
@@ -333,6 +338,8 @@ def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, messages, a
         user_info (dict): Informazioni dell'utente
         prompt_key (str): Chiave del prompt selezionato
         prompt_data (dict): Dati del prompt
+        norm_key (str): Chiave della norma selezionata
+        norm_data (dict): Dati della norma
         messages (list): Lista dei messaggi
         argumentation (str): Testo dell'argomentazione finale
         word_tracking (dict): Tracking delle parole per secondo
@@ -359,10 +366,12 @@ def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, messages, a
             user_info["prolific_id"],
             prompt_key,
             prompt_data["title"],
+            norm_key,
+            norm_data["title"],
             conversation_json,
             argumentation,
-            word_tracking_formatted,  # ← Colonna con il tracking
-            final_chat_json,           # ← Colonna con la chat finale
+            word_tracking_formatted,
+            final_chat_json,
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ])
         return True
@@ -391,6 +400,8 @@ try:
         st.session_state.user_data_collected = False
     if "prompt_selected" not in st.session_state:
         st.session_state.prompt_selected = False
+    if "norm_selected" not in st.session_state:
+        st.session_state.norm_selected = False
     if "user_info" not in st.session_state:
         st.session_state.user_info = {}
     if "messages" not in st.session_state:
@@ -403,6 +414,8 @@ try:
         st.session_state.initial_score = None
     if "selected_prompt_key" not in st.session_state:
         st.session_state.selected_prompt_key = None
+    if "selected_norm_key" not in st.session_state:
+        st.session_state.selected_norm_key = None
     if "conversation_ended" not in st.session_state:
         st.session_state.conversation_ended = False
     if "final_argumentation" not in st.session_state:
@@ -416,12 +429,21 @@ try:
     if "last_check_time" not in st.session_state:
         st.session_state.last_check_time = time.time()
     
-    # Verifica se i prompt sono stati caricati
+    # Verifica se i file sono stati caricati
     if not PROMPTS:
         st.markdown("""
         <div class="error">
-            <strong>Errore Critico:</strong> Impossibile caricare i prompt dal file JSON.
-            Verifica che il file prompts.json sia presente nella directory dell'applicazione.
+            <strong>Errore Critico:</strong> Impossibile caricare i prompt dal file prompts.json.
+            Verifica che il file sia presente nella directory dell'applicazione.
+        </div>
+        """, unsafe_allow_html=True)
+        st.stop()
+    
+    if not NORMS:
+        st.markdown("""
+        <div class="error">
+            <strong>Errore Critico:</strong> Impossibile caricare le norme dal file norms.json.
+            Verifica che il file sia presente nella directory dell'applicazione.
         </div>
         """, unsafe_allow_html=True)
         st.stop()
@@ -435,7 +457,7 @@ try:
             
             st.markdown("<p class='info-text'>Your information will be used only for research purposes.</p>", unsafe_allow_html=True)
             
-            submitted = st.form_submit_button("Continue to Prompt Selection", use_container_width=True)
+            submitted = st.form_submit_button("Continue to Selection", use_container_width=True)
             
             if submitted:
                 if prolific_id:
@@ -461,8 +483,6 @@ try:
         
         st.markdown("<p style='color: #666; margin-bottom: 2rem;'>Choose one of the following topics you'd like to explore:</p>", unsafe_allow_html=True)
         
-        cols = st.columns(1)
-        
         for prompt_key, prompt_data in PROMPTS.items():
             st.markdown(f"""
             <div class="prompt-option">
@@ -476,24 +496,67 @@ try:
                 st.session_state.prompt_selected = True
                 st.rerun()
     
-    # PHASE 3: Chat with OpenAI
+    # PHASE 3: Norm Selection
+    elif not st.session_state.norm_selected:
+        user_info = st.session_state.user_info
+        prompt_data = PROMPTS[st.session_state.selected_prompt_key]
+        
+        st.markdown(f"""
+        <div class="success-badge">
+            Great choice, <strong>{user_info['prolific_id']}</strong>! Topic selected: <strong>{prompt_data['title']}</strong>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<h2 style='color: #1a1a1a; font-weight: 600; margin-bottom: 2rem;'>Select a Social Norm</h2>", unsafe_allow_html=True)
+        
+        st.markdown("<p style='color: #666; margin-bottom: 2rem;'>Choose the social norm you'd like to discuss in the final argumentation:</p>", unsafe_allow_html=True)
+        
+        for norm_key, norm_data in NORMS.items():
+            st.markdown(f"""
+            <div class="prompt-option">
+                <h3>{norm_data['title']}</h3>
+                <p>{norm_data['description']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button(f"Select: {norm_data['title']}", key=norm_key, use_container_width=True):
+                st.session_state.selected_norm_key = norm_key
+                st.session_state.norm_selected = True
+                st.rerun()
+        
+        # Back button
+        if st.button("← Change Topic", key="back_to_prompt"):
+            st.session_state.prompt_selected = False
+            st.rerun()
+    
+    # PHASE 4: Chat with OpenAI
     elif not st.session_state.conversation_ended:
         user_info = st.session_state.user_info
         prompt_key = st.session_state.selected_prompt_key
         prompt_data = PROMPTS[prompt_key]
+        norm_key = st.session_state.selected_norm_key
+        norm_data = NORMS[norm_key]
         
         st.markdown(f"""
         <div class="success-badge">
-            Welcome back, <strong>{user_info['prolific_id']}</strong>. Topic: <strong>{prompt_data['title']}</strong>
+            Welcome back, <strong>{user_info['prolific_id']}</strong>. 
+            <br>Topic: <strong>{prompt_data['title']}</strong> | Norm: <strong>{norm_data['title']}</strong>
         </div>
         """, unsafe_allow_html=True)
         
-        # Add reset button
-        if st.button("Change Topic", key="change_topic"):
-            st.session_state.prompt_selected = False
-            st.session_state.messages = []
-            st.session_state.greeting_sent = False
-            st.rerun()
+        # Add reset buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("← Change Topic", key="change_topic"):
+                st.session_state.prompt_selected = False
+                st.session_state.norm_selected = False
+                st.session_state.messages = []
+                st.session_state.greeting_sent = False
+                st.rerun()
+        with col2:
+            if st.button("← Change Norm", key="change_norm"):
+                st.session_state.norm_selected = False
+                st.rerun()
         
         st.markdown("<hr>", unsafe_allow_html=True)
         
@@ -572,11 +635,13 @@ try:
                 "timestamp": response_timestamp
             })
     
-    # PHASE 4: Final Argumentation Form + Lateral Chat
+    # PHASE 5: Final Argumentation Form + Lateral Chat
     else:
         user_info = st.session_state.user_info
         prompt_key = st.session_state.selected_prompt_key
         prompt_data = PROMPTS[prompt_key]
+        norm_key = st.session_state.selected_norm_key
+        norm_data = NORMS[norm_key]
         
         st.markdown(f"""
         <div class="success-badge">
@@ -586,16 +651,16 @@ try:
         
         st.markdown("<h2 style='color: #1a1a1a; font-weight: 600; margin-bottom: 2rem;'>Final Question</h2>", unsafe_allow_html=True)
         
-        st.markdown("""
+        # Display the norm-specific question
+        st.markdown(f"""
         <p style='color: #666; margin-bottom: 1.5rem; font-size: 1rem;'>
-            Please explain in detail why you believe it is <strong>not correct to drink during a job interview</strong>. 
-            Share your reasoning and any relevant considerations.
+            {norm_data['question']}
         </p>
         """, unsafe_allow_html=True)
         
         # Create OpenAI client for final chat
         openai_client = OpenAI(api_key=openai_api_key)
-        final_chat_system_prompt = "You are a helpful assistant. Answer questions about the topic discussed: why it's not correct to drink during a job interview. Be supportive and provide insights."
+        final_chat_system_prompt = f"You are a helpful assistant. Answer questions about the topic discussed: {norm_data['description']}. Be supportive and provide insights."
         
         # Create two columns: form on left, AI Assistant on right
         col_form, col_assistant = st.columns([2, 1])
@@ -623,7 +688,7 @@ try:
                 height=300,
                 label_visibility="collapsed",
                 key="argumentation_input",
-                on_change=track_words_callback  # ← Traccia silenziosamente
+                on_change=track_words_callback
             )
             
             # Form solo per il bottone di submit
@@ -643,12 +708,14 @@ try:
                         print(f"  Secondo {second}: {word_count} parole")
                     
                     # Salva tutto normalmente
-                    save_conversation_to_json(user_info, prompt_data, st.session_state.messages)
+                    save_conversation_to_json(user_info, prompt_data, norm_data, st.session_state.messages)
                     success = save_to_google_sheets(
                         sheet,
                         user_info,
                         prompt_key,
                         prompt_data,
+                        norm_key,
+                        norm_data,
                         st.session_state.messages,
                         argumentation,
                         word_tracking=dict(st.session_state.word_tracking),
@@ -663,6 +730,8 @@ try:
                         """, unsafe_allow_html=True)
                 else:
                     st.markdown("<div class='error'>Please provide an argumentation to continue.</div>", unsafe_allow_html=True)
+        
+        with col_assistant:
             st.markdown("### AI Assistant")
             
             # Display chat messages

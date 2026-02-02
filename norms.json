@@ -1,0 +1,32 @@
+{
+  "norm_1": {
+    "title": "Crying in public parks",
+    "description": "It is acceptable to cry in public parks",
+    "question": "Please explain in detail your view on whether it is <strong>acceptable to cry in public parks</strong>. Share your reasoning and any relevant considerations."
+  },
+  "norm_2": {
+    "title": "Drinking during a job interview",
+    "description": "It is not correct to drink alcohol during a job interview",
+    "question": "Please explain in detail why you believe it is <strong>not correct to drink alcohol during a job interview</strong>. Share your reasoning and any relevant considerations."
+  },
+  "norm_3": {
+    "title": "Using phone during dinner",
+    "description": "It is not appropriate to use your phone during a family dinner",
+    "question": "Please explain in detail why you believe it is <strong>not appropriate to use your phone during a family dinner</strong>. Share your reasoning and any relevant considerations."
+  },
+  "norm_4": {
+    "title": "Interrupting someone speaking",
+    "description": "It is impolite to interrupt someone while they are speaking",
+    "question": "Please explain in detail why you believe it is <strong>impolite to interrupt someone while they are speaking</strong>. Share your reasoning and any relevant considerations."
+  },
+  "norm_5": {
+    "title": "Arriving late to appointments",
+    "description": "It is disrespectful to consistently arrive late to appointments",
+    "question": "Please explain in detail why you believe it is <strong>disrespectful to consistently arrive late to appointments</strong>. Share your reasoning and any relevant considerations."
+  },
+  "norm_6": {
+    "title": "Loud talking in libraries",
+    "description": "It is inappropriate to talk loudly in libraries",
+    "question": "Please explain in detail why you believe it is <strong>inappropriate to talk loudly in libraries</strong>. Share your reasoning and any relevant considerations."
+  }
+}

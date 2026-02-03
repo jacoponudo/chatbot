@@ -239,6 +239,20 @@ st.markdown("""
         margin-bottom: 1rem;
     }
     
+    .opinion-container {
+        background: white;
+        padding: 2.5rem;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        border: 1px solid #e5e7eb;
+        margin-bottom: 2rem;
+    }
+    
+    .end-conversation-btn {
+        background: #dc2626 !important;
+        margin-top: 1rem;
+    }
+    
     @media (max-width: 1200px) {
         .final-phase-container {
             flex-direction: column;
@@ -329,24 +343,11 @@ def save_conversation_to_json(user_info, prompt_data, norm_data, messages, filen
 # ============================================================================
 # SALVATAGGIO SU GOOGLE SHEETS
 # ============================================================================
-def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, norm_key, norm_data, messages, argumentation, word_tracking=None, final_chat_messages=None):
+def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, norm_key, norm_data, messages, 
+                          initial_opinion=None, final_opinion=None, argumentation=None, 
+                          word_tracking=None, final_chat_messages=None):
     """
     Salva i dati su Google Sheets.
-    
-    Args:
-        sheet: Sheet object di gspread
-        user_info (dict): Informazioni dell'utente
-        prompt_key (str): Chiave del prompt selezionato
-        prompt_data (dict): Dati del prompt
-        norm_key (str): Chiave della norma selezionata
-        norm_data (dict): Dati della norma
-        messages (list): Lista dei messaggi
-        argumentation (str): Testo dell'argomentazione finale
-        word_tracking (dict): Tracking delle parole per secondo
-        final_chat_messages (list): Messaggi della chat finale
-    
-    Returns:
-        bool: True se il salvataggio è riuscito, False altrimenti
     """
     try:
         conversation_json = json.dumps(messages, ensure_ascii=False, indent=2)
@@ -368,8 +369,10 @@ def save_to_google_sheets(sheet, user_info, prompt_key, prompt_data, norm_key, n
             prompt_data["title"],
             norm_key,
             norm_data["title"],
+            str(initial_opinion) if initial_opinion is not None else "",
+            str(final_opinion) if final_opinion is not None else "",
             conversation_json,
-            argumentation,
+            argumentation or "",
             word_tracking_formatted,
             final_chat_json,
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -402,6 +405,8 @@ try:
         st.session_state.prompt_selected = False
     if "norm_selected" not in st.session_state:
         st.session_state.norm_selected = False
+    if "initial_opinion_collected" not in st.session_state:
+        st.session_state.initial_opinion_collected = False
     if "user_info" not in st.session_state:
         st.session_state.user_info = {}
     if "messages" not in st.session_state:
@@ -410,8 +415,10 @@ try:
         st.session_state.greeting_sent = False
     if "conversation_phase" not in st.session_state:
         st.session_state.conversation_phase = "initial_greeting"
-    if "initial_score" not in st.session_state:
-        st.session_state.initial_score = None
+    if "initial_opinion" not in st.session_state:
+        st.session_state.initial_opinion = None
+    if "final_opinion" not in st.session_state:
+        st.session_state.final_opinion = None
     if "selected_prompt_key" not in st.session_state:
         st.session_state.selected_prompt_key = None
     if "selected_norm_key" not in st.session_state:
@@ -428,6 +435,10 @@ try:
         st.session_state.word_tracking = defaultdict(int)
     if "last_check_time" not in st.session_state:
         st.session_state.last_check_time = time.time()
+    if "message_count" not in st.session_state:
+        st.session_state.message_count = 0
+    if "final_opinion_collected" not in st.session_state:
+        st.session_state.final_opinion_collected = False
     
     # Verifica se i file sono stati caricati
     if not PROMPTS:
@@ -528,38 +539,58 @@ try:
             st.session_state.prompt_selected = False
             st.rerun()
     
+    # PHASE 3.5: Initial Opinion Collection
+    elif not st.session_state.initial_opinion_collected:
+        user_info = st.session_state.user_info
+        prompt_data = PROMPTS[st.session_state.selected_prompt_key]
+        norm_data = NORMS[st.session_state.selected_norm_key]
+        
+        st.markdown(f"""
+        <div class="success-badge">
+            Topic: <strong>{prompt_data['title']}</strong> | Norm: <strong>{norm_data['title']}</strong>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<div class='opinion-container'>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color: #1a1a1a; font-weight: 600; margin-bottom: 1.5rem;'>Initial Opinion</h2>", unsafe_allow_html=True)
+        st.markdown(f"<p style='color: #666; margin-bottom: 2rem;'>Before starting the conversation, please indicate your current opinion on: <strong>{norm_data['title']}</strong></p>", unsafe_allow_html=True)
+        
+        initial_opinion = st.slider(
+            "Rate your agreement (1 = Strongly Disagree, 7 = Strongly Agree)",
+            min_value=1,
+            max_value=7,
+            value=4,
+            key="initial_opinion_slider"
+        )
+        
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("← Back", key="back_from_initial_opinion"):
+                st.session_state.norm_selected = False
+                st.rerun()
+        with col2:
+            if st.button("Continue to Conversation", key="submit_initial_opinion", use_container_width=True, type="primary"):
+                st.session_state.initial_opinion = initial_opinion
+                st.session_state.initial_opinion_collected = True
+                st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
     # PHASE 4: Chat with OpenAI
     elif not st.session_state.conversation_ended:
         user_info = st.session_state.user_info
         prompt_key = st.session_state.selected_prompt_key
         prompt_data = PROMPTS[prompt_key]
         norm_key = st.session_state.selected_norm_key
-        print(norm_key)
         norm_data = NORMS[norm_key]
-        print(norm_data)
 
         st.markdown(f"""
         <div class="success-badge">
             Welcome back, <strong>{user_info['prolific_id']}</strong>. 
             <br>Topic: <strong>{prompt_data['title']}</strong> | Norm: <strong>{norm_data['title']}</strong>
+            <br>Initial Opinion: <strong>{st.session_state.initial_opinion}/7</strong>
         </div>
         """, unsafe_allow_html=True)
-        
-        # Add reset buttons
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("← Change Topic", key="change_topic"):
-                st.session_state.prompt_selected = False
-                st.session_state.norm_selected = False
-                st.session_state.messages = []
-                st.session_state.greeting_sent = False
-                st.rerun()
-        with col2:
-            if st.button("← Change Norm", key="change_norm"):
-                st.session_state.norm_selected = False
-                st.session_state.messages = []
-                st.session_state.greeting_sent = False
-                st.rerun()
         
         st.markdown("<hr>", unsafe_allow_html=True)
         
@@ -595,6 +626,17 @@ try:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 st.markdown(f"<div class='timestamp'>{message.get('timestamp', 'N/A')}</div>", unsafe_allow_html=True)
+        
+        # Conta i messaggi dell'utente (esclusi quelli dell'assistente)
+        user_message_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
+        
+        # Mostra il pulsante per terminare la conversazione dopo 3 messaggi scambiati
+        # (3 messaggi utente = 3 scambi completi considerando che l'assistente risponde sempre)
+        if user_message_count >= 3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🛑 End Conversation and Proceed", key="end_conversation_btn", use_container_width=True):
+                st.session_state.conversation_ended = True
+                st.rerun()
         
         # Chat input
         st.markdown("<br>", unsafe_allow_html=True)
@@ -638,8 +680,43 @@ try:
                 "content": response,
                 "timestamp": response_timestamp
             })
+            
+            st.rerun()
     
-    # PHASE 5: Final Argumentation Form + Lateral Chat
+    # PHASE 5: Final Opinion Collection
+    elif not st.session_state.final_opinion_collected:
+        user_info = st.session_state.user_info
+        prompt_data = PROMPTS[st.session_state.selected_prompt_key]
+        norm_data = NORMS[st.session_state.selected_norm_key]
+        
+        st.markdown(f"""
+        <div class="success-badge">
+            Conversation completed! Now let's collect your final opinion.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<div class='opinion-container'>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color: #1a1a1a; font-weight: 600; margin-bottom: 1.5rem;'>Final Opinion</h2>", unsafe_allow_html=True)
+        st.markdown(f"<p style='color: #666; margin-bottom: 2rem;'>After the conversation, please indicate your current opinion on: <strong>{norm_data['title']}</strong></p>", unsafe_allow_html=True)
+        
+        final_opinion = st.slider(
+            "Rate your agreement (1 = Strongly Disagree, 7 = Strongly Agree)",
+            min_value=1,
+            max_value=7,
+            value=st.session_state.initial_opinion,  # Default al valore iniziale
+            key="final_opinion_slider"
+        )
+        
+        st.markdown(f"<p style='color: #999; font-size: 0.9rem; margin-top: 1rem;'>Your initial opinion was: <strong>{st.session_state.initial_opinion}/7</strong></p>", unsafe_allow_html=True)
+        
+        if st.button("Submit Final Opinion and Continue", key="submit_final_opinion", use_container_width=True, type="primary"):
+            st.session_state.final_opinion = final_opinion
+            st.session_state.final_opinion_collected = True
+            st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    # PHASE 6: Final Phase - Argumentation + Optional Chat
     else:
         user_info = st.session_state.user_info
         prompt_key = st.session_state.selected_prompt_key
@@ -649,69 +726,32 @@ try:
         
         st.markdown(f"""
         <div class="success-badge">
-            Thank you for the conversation, <strong>{user_info['prolific_id']}</strong>!
+            Final Phase: Write your argumentation
+            <br>Initial Opinion: <strong>{st.session_state.initial_opinion}/7</strong> → Final Opinion: <strong>{st.session_state.final_opinion}/7</strong>
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<h2 style='color: #1a1a1a; font-weight: 600; margin-bottom: 2rem;'>Final Question</h2>", unsafe_allow_html=True)
+        st.markdown("<hr>", unsafe_allow_html=True)
         
-        # Display the norm-specific question
-        st.markdown(f"""
-        <p style='color: #666; margin-bottom: 1.5rem; font-size: 1rem;'>
-            {norm_data['question']}
-        </p>
-        """, unsafe_allow_html=True)
+        # Due colonne: form e chat
+        col_form, col_assistant = st.columns([1, 1])
         
-        # Create OpenAI client for final chat
-        openai_client = OpenAI(api_key=openai_api_key)
-        final_chat_system_prompt = f"You are a helpful assistant. Answer questions about the topic discussed: {norm_data['title']}. Be supportive and provide insights."
-        
-        # Create two columns: form on left, AI Assistant on right
-        col_form, col_assistant = st.columns([2, 1])
-
-        def track_words_callback():
-            """Callback silenzioso che traccia le parole ogni secondo"""
-            current_time = time.time()
-            current_text = st.session_state.get("argumentation_input", "")
-            word_count = len(current_text.split()) if current_text.strip() else 0
-            
-            # Arrotonda il tempo al secondo più vicino
-            second_bucket = int(current_time)
-            
-            # Salva il conteggio delle parole per quel secondo
-            st.session_state.word_tracking[second_bucket] = word_count
-            st.session_state.last_check_time = current_time
-
         with col_form:
-            st.markdown("### Your Response")
+            st.markdown("<h3 style='margin-bottom: 1.5rem;'>Your Argumentation</h3>", unsafe_allow_html=True)
+            st.markdown(f"<p style='color: #666; margin-bottom: 1rem;'>Write a brief argumentation about: <strong>{norm_data['title']}</strong></p>", unsafe_allow_html=True)
             
-            # Text area FUORI dal form per permettere il callback
             argumentation = st.text_area(
                 "Your argumentation:",
-                placeholder="Type your explanation here...",
                 height=300,
-                label_visibility="collapsed",
-                key="argumentation_input",
-                on_change=track_words_callback
+                placeholder="Write your thoughts here...",
+                key="final_argumentation_area"
             )
             
-            # Form solo per il bottone di submit
-            with st.form("final_argumentation_form"):
-                submitted = st.form_submit_button("Submit and Complete", use_container_width=True)
-
-            if submitted:
+            if st.button("📤 Submit and Complete", key="submit_final", use_container_width=True, type="primary"):
                 if argumentation.strip():
                     st.session_state.final_argumentation = argumentation
                     
-                    # Traccia finale
-                    track_words_callback()
-                    
-                    # Stampa il tracking (solo tu lo vedi nei log/debug)
-                    print("📊 WORD TRACKING PER SECONDO:")
-                    for second, word_count in sorted(st.session_state.word_tracking.items()):
-                        print(f"  Secondo {second}: {word_count} parole")
-                    
-                    # Salva tutto normalmente
+                    # Salva tutto
                     save_conversation_to_json(user_info, prompt_data, norm_data, st.session_state.messages)
                     success = save_to_google_sheets(
                         sheet,
@@ -721,7 +761,9 @@ try:
                         norm_key,
                         norm_data,
                         st.session_state.messages,
-                        argumentation,
+                        initial_opinion=st.session_state.initial_opinion,
+                        final_opinion=st.session_state.final_opinion,
+                        argumentation=argumentation,
                         word_tracking=dict(st.session_state.word_tracking),
                         final_chat_messages=st.session_state.final_chat_messages
                     )
@@ -737,6 +779,25 @@ try:
         
         with col_assistant:
             st.markdown("### AI Assistant")
+            st.markdown("<p style='color: #666; font-size: 0.9rem; margin-bottom: 1rem;'>Need help? Ask the assistant anything!</p>", unsafe_allow_html=True)
+            
+            # Create OpenAI client
+            openai_client = OpenAI(api_key=openai_api_key)
+            
+            # System prompt per la chat finale
+            final_chat_system_prompt = f"""You are a helpful assistant helping the user write their final argumentation about the norm: "{norm_data['title']}". 
+            Provide helpful suggestions, ask clarifying questions, and help them organize their thoughts. 
+            Be supportive and encouraging."""
+            
+            # Send initial greeting if not sent
+            if not st.session_state.final_chat_greeting_sent:
+                initial_greeting = "Hello! I'm here to help you write your argumentation. Feel free to ask me questions or request suggestions!"
+                st.session_state.final_chat_messages.append({
+                    "role": "assistant",
+                    "content": initial_greeting,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                st.session_state.final_chat_greeting_sent = True
             
             # Display chat messages
             chat_container = st.container(border=True, height=400)

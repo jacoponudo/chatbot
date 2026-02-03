@@ -381,3 +381,164 @@ if not st.session_state.is_submitted:
     # Forza il rerun dopo 1 secondo usando st.rerun() con timer
     time.sleep(0.1)  # Piccolo delay per evitare loop troppo veloci
     st.rerun()
+
+
+
+    '''
+    
+        
+    # PHASE 5: Final Argumentation Form + Lateral Chat
+    else:
+        user_info = st.session_state.user_info
+        prompt_key = st.session_state.selected_prompt_key
+        prompt_data = PROMPTS[prompt_key]
+        norm_key = st.session_state.selected_norm_key
+        norm_data = NORMS[norm_key]
+        
+        st.markdown(f"""
+        <div class="success-badge">
+            Thank you for the conversation, <strong>{user_info['prolific_id']}</strong>!
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<h2 style='color: #1a1a1a; font-weight: 600; margin-bottom: 2rem;'>Final Question</h2>", unsafe_allow_html=True)
+        
+        # Display the norm-specific question
+        st.markdown(f"""
+        <p style='color: #666; margin-bottom: 1.5rem; font-size: 1rem;'>
+            {norm_data['question']}
+        </p>
+        """, unsafe_allow_html=True)
+        
+        # Create OpenAI client for final chat
+        openai_client = OpenAI(api_key=openai_api_key)
+        final_chat_system_prompt = f"You are a helpful assistant. Answer questions about the topic discussed: {norm_data['title']}. Be supportive and provide insights."
+        
+        # Create two columns: form on left, AI Assistant on right
+        col_form, col_assistant = st.columns([2, 1])
+
+        def track_words_callback():
+            """Callback silenzioso che traccia le parole ogni secondo"""
+            current_time = time.time()
+            current_text = st.session_state.get("argumentation_input", "")
+            word_count = len(current_text.split()) if current_text.strip() else 0
+            
+            # Arrotonda il tempo al secondo più vicino
+            second_bucket = int(current_time)
+            
+            # Salva il conteggio delle parole per quel secondo
+            st.session_state.word_tracking[second_bucket] = word_count
+            st.session_state.last_check_time = current_time
+
+        with col_form:
+            st.markdown("### Your Response")
+            
+            # Text area FUORI dal form per permettere il callback
+            argumentation = st.text_area(
+                "Your argumentation:",
+                placeholder="Type your explanation here...",
+                height=300,
+                label_visibility="collapsed",
+                key="argumentation_input",
+                on_change=track_words_callback
+            )
+            
+            # Form solo per il bottone di submit
+            with st.form("final_argumentation_form"):
+                submitted = st.form_submit_button("Submit and Complete", use_container_width=True)
+
+            if submitted:
+                if argumentation.strip():
+                    st.session_state.final_argumentation = argumentation
+                    
+                    # Traccia finale
+                    track_words_callback()
+                    
+                    # Stampa il tracking (solo tu lo vedi nei log/debug)
+                    print("📊 WORD TRACKING PER SECONDO:")
+                    for second, word_count in sorted(st.session_state.word_tracking.items()):
+                        print(f"  Secondo {second}: {word_count} parole")
+                    
+                    # Salva tutto normalmente
+                    save_conversation_to_json(user_info, prompt_data, norm_data, st.session_state.messages)
+                    success = save_to_google_sheets(
+                        sheet,
+                        user_info,
+                        prompt_key,
+                        prompt_data,
+                        norm_key,
+                        norm_data,
+                        st.session_state.messages,
+                        argumentation,
+                        word_tracking=dict(st.session_state.word_tracking),
+                        final_chat_messages=st.session_state.final_chat_messages
+                    )
+                    
+                    if success:
+                        st.markdown("""
+                            <div class="success-badge">
+                                ✅ Thank you for your participation! Your responses have been recorded.
+                            </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.markdown("<div class='error'>Please provide an argumentation to continue.</div>", unsafe_allow_html=True)
+        
+        with col_assistant:
+            st.markdown("### AI Assistant")
+            
+            # Display chat messages
+            chat_container = st.container(border=True, height=400)
+            with chat_container:
+                for message in st.session_state.final_chat_messages:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["content"])
+                        st.markdown(f"<div class='timestamp'>{message.get('timestamp', 'N/A')}</div>", unsafe_allow_html=True)
+            
+            # Chat input
+            if final_chat_prompt := st.chat_input("Ask something...", key="final_chat_input"):
+                # Add user message
+                st.session_state.final_chat_messages.append({
+                    "role": "user",
+                    "content": final_chat_prompt,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                
+                # Generate response from OpenAI
+                messages_for_api = [{"role": "system", "content": final_chat_system_prompt}] + [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.final_chat_messages
+                ]
+                
+                response = openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=messages_for_api,
+                    stream=False,
+                )
+                
+                response_text = response.choices[0].message.content
+                response_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                st.session_state.final_chat_messages.append({
+                    "role": "assistant",
+                    "content": response_text,
+                    "timestamp": response_timestamp
+                })
+                
+                st.rerun()
+
+except KeyError as e:
+    st.markdown("""
+    <div class="error">
+        <strong>Configuration Error:</strong> Please configure the following in secrets.toml:
+        <br>• gcp_service_account
+        <br>• google_sheet_url
+        <br>• openai_api_key
+    </div>
+    """, unsafe_allow_html=True)
+except Exception as e:
+    st.markdown(f"""
+    <div class="error">
+        <strong>Error:</strong> {str(e)}
+    </div>
+    """, unsafe_allow_html=True)
+    '''

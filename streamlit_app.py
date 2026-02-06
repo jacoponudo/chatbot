@@ -6,6 +6,7 @@ from openai import OpenAI
 import json
 import os
 import time
+import random
 from collections import defaultdict
 
 # Page configuration
@@ -146,6 +147,15 @@ st.markdown("""
         padding: 1rem 1.5rem;
         border-radius: 8px;
         border-left: 4px solid #ef4444;
+        font-size: 0.95rem;
+    }
+    
+    .warning {
+        background: #fffbeb;
+        color: #92400e;
+        padding: 1rem 1.5rem;
+        border-radius: 8px;
+        border-left: 4px solid #f59e0b;
         font-size: 0.95rem;
     }
     
@@ -298,6 +308,97 @@ NORMS = load_json_from_file("norms.json", "norms")
 
 
 # ============================================================================
+# VERIFICA PROLIFIC ID
+# ============================================================================
+def check_prolific_id_exists(sheet, prolific_id):
+    """
+    Verifica se un Prolific ID esiste già nel Google Sheet.
+    
+    Args:
+        sheet: Google Sheet object
+        prolific_id (str): Prolific ID da verificare
+    
+    Returns:
+        bool: True se il Prolific ID esiste già, False altrimenti
+    """
+    try:
+        # Ottieni tutti i valori dalla prima colonna (Prolific ID)
+        all_values = sheet.col_values(1)
+        
+        # Rimuovi l'intestazione (prima riga)
+        if len(all_values) > 1:
+            existing_ids = all_values[1:]
+        else:
+            existing_ids = []
+        
+        # Verifica se il Prolific ID esiste già (case-insensitive)
+        return prolific_id.strip().lower() in [id.strip().lower() for id in existing_ids]
+    
+    except Exception as e:
+        st.error(f"❌ Errore nella verifica del Prolific ID: {str(e)}")
+        return False
+
+
+# ============================================================================
+# ANALISI FREQUENZE COMBINAZIONI PROMPT-NORM
+# ============================================================================
+def get_least_used_combination(sheet, prompts_dict, norms_dict):
+    """
+    Analizza il Google Sheet e trova la combinazione Prompt-Norm meno utilizzata.
+    
+    Args:
+        sheet: Google Sheet object
+        prompts_dict (dict): Dizionario dei prompt disponibili
+        norms_dict (dict): Dizionario delle norme disponibili
+    
+    Returns:
+        tuple: (prompt_key, norm_key) della combinazione meno utilizzata
+    """
+    try:
+        # Ottieni tutti i dati dal foglio (escludendo l'intestazione)
+        all_data = sheet.get_all_values()
+        
+        # Inizializza il contatore delle combinazioni
+        combination_counts = defaultdict(int)
+        
+        # Crea tutte le possibili combinazioni
+        for prompt_key in prompts_dict.keys():
+            for norm_key in norms_dict.keys():
+                combination_counts[(prompt_key, norm_key)] = 0
+        
+        # Conta le combinazioni esistenti nel Google Sheet
+        # Colonne: Prolific ID (0), Prompt (1), Norm (3)
+        if len(all_data) > 1:  # Se ci sono dati oltre l'intestazione
+            for row in all_data[1:]:  # Salta l'intestazione
+                if len(row) >= 4:
+                    prompt_key = row[1]  # Colonna Prompt
+                    norm_key = row[3]    # Colonna Norm
+                    
+                    # Incrementa il contatore solo se la combinazione è valida
+                    if prompt_key in prompts_dict and norm_key in norms_dict:
+                        combination_counts[(prompt_key, norm_key)] += 1
+        
+        # Trova la combinazione con la frequenza minima
+        min_count = min(combination_counts.values())
+        least_used_combinations = [
+            combo for combo, count in combination_counts.items() 
+            if count == min_count
+        ]
+        
+        # Se ci sono più combinazioni con la stessa frequenza minima, scegline una casualmente
+        selected_combination = random.choice(least_used_combinations)
+        
+        st.info(f"📊 Combinazione selezionata automaticamente: Prompt='{selected_combination[0]}', Norm='{selected_combination[1]}' (usata {min_count} volte)")
+        
+        return selected_combination
+    
+    except Exception as e:
+        st.error(f"❌ Errore nell'analisi delle frequenze: {str(e)}")
+        # In caso di errore, ritorna la prima combinazione disponibile
+        return (list(prompts_dict.keys())[0], list(norms_dict.keys())[0])
+
+
+# ============================================================================
 # SALVATAGGIO CONVERSAZIONE IN JSON
 # ============================================================================
 def save_conversation_to_json(user_info, prompt_data, norm_data, messages, filename=None):
@@ -320,9 +421,7 @@ def save_conversation_to_json(user_info, prompt_data, norm_data, messages, filen
             "metadata": {
                 "prolific_id": user_info['prolific_id'],
                 "prompt_title": prompt_data['title'],
-                "prompt_description": prompt_data['description'],
                 "norm_title": norm_data['title'],
-                "norm_description": norm_data['description'],
                 "start_date": user_info['start_date'],
                 "end_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "total_messages": len(messages)
@@ -467,79 +566,43 @@ try:
             prolific_id = st.text_input("Prolific ID", placeholder="Enter your Prolific ID")
             
             st.markdown("<p class='info-text'>Your information will be used only for research purposes.</p>", unsafe_allow_html=True)
+            st.markdown("<p class='info-text'>A topic and norm will be automatically assigned to you based on experimental balance.</p>", unsafe_allow_html=True)
             
-            submitted = st.form_submit_button("Continue to Selection", use_container_width=True)
+            submitted = st.form_submit_button("Continue", use_container_width=True)
             
             if submitted:
                 if prolific_id:
-                    st.session_state.user_info = {
-                        "prolific_id": prolific_id,
-                        "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    st.session_state.user_data_collected = True
-                    st.rerun()
+                    # VERIFICA SE IL PROLIFIC ID ESISTE GIÀ
+                    if check_prolific_id_exists(sheet, prolific_id):
+                        st.markdown("""
+                        <div class="warning">
+                            ⚠️ <strong>This Prolific ID has already been used.</strong>
+                            <br>If you believe this is an error, please contact the researcher.
+                            <br>Otherwise, please use a different Prolific ID.
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        # Trova la combinazione Prompt-Norm meno utilizzata
+                        selected_prompt_key, selected_norm_key = get_least_used_combination(sheet, PROMPTS, NORMS)
+                        
+                        # Salva le informazioni dell'utente e le assegnazioni
+                        st.session_state.user_info = {
+                            "prolific_id": prolific_id,
+                            "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        st.session_state.selected_prompt_key = selected_prompt_key
+                        st.session_state.selected_norm_key = selected_norm_key
+                        st.session_state.user_data_collected = True
+                        st.session_state.prompt_selected = True
+                        st.session_state.norm_selected = True
+                        st.rerun()
                 else:
                     st.markdown("<div class='error'>Please fill in all fields to continue.</div>", unsafe_allow_html=True)
     
-    # PHASE 2: Prompt Selection
-    elif not st.session_state.prompt_selected:
-        user_info = st.session_state.user_info
-        st.markdown(f"""
-        <div class="success-badge">
-            Welcome, <strong>{user_info['prolific_id']}</strong>! Please select a topic for our conversation.
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("<h2 style='color: #1a1a1a; font-weight: 600; margin-bottom: 2rem;'>Select a Conversation Topic</h2>", unsafe_allow_html=True)
-        
-        st.markdown("<p style='color: #666; margin-bottom: 2rem;'>Choose one of the following topics you'd like to explore:</p>", unsafe_allow_html=True)
-        
-        for prompt_key, prompt_data in PROMPTS.items():
-            st.markdown(f"""
-            <div class="prompt-option">
-                <h3>{prompt_data['title']}</h3>
-                <p>{prompt_data['description']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if st.button(f"Select: {prompt_data['title']}", key=prompt_key, use_container_width=True):
-                st.session_state.selected_prompt_key = prompt_key
-                st.session_state.prompt_selected = True
-                st.rerun()
+    # PHASE 2: Prompt and Norm Auto-Selected - Direct to Initial Opinion
+    # (Le fasi di selezione manuale sono state rimosse, si passa direttamente alla raccolta dell'opinione iniziale)
     
-    # PHASE 3: Norm Selection
-    elif not st.session_state.norm_selected:
-        user_info = st.session_state.user_info
-        prompt_data = PROMPTS[st.session_state.selected_prompt_key]
-        
-        st.markdown(f"""
-        <div class="success-badge">
-            Great choice, <strong>{user_info['prolific_id']}</strong>! Topic selected: <strong>{prompt_data['title']}</strong>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("<h2 style='color: #1a1a1a; font-weight: 600; margin-bottom: 2rem;'>Select a Social Norm</h2>", unsafe_allow_html=True)
-        
-        st.markdown("<p style='color: #666; margin-bottom: 2rem;'>Choose the social norm you'd like to discuss in the final argumentation:</p>", unsafe_allow_html=True)
-        
-        for norm_key, norm_data in NORMS.items():
-            st.markdown(f"""
-            <div class="prompt-option">
-                <h3>{norm_data['title']}</h3>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if st.button(f"Select: {norm_data['title']}", key=norm_key, use_container_width=True):
-                st.session_state.selected_norm_key = norm_key
-                st.session_state.norm_selected = True
-                st.rerun()
-        
-        # Back button
-        if st.button("← Change Topic", key="back_to_prompt"):
-            st.session_state.prompt_selected = False
-            st.rerun()
-    
-    # PHASE 3.5: Initial Opinion Collection
+    # PHASE 3: Initial Opinion Collection
     elif not st.session_state.initial_opinion_collected:
         user_info = st.session_state.user_info
         prompt_data = PROMPTS[st.session_state.selected_prompt_key]
@@ -563,16 +626,10 @@ try:
             key="initial_opinion_slider"
         )
         
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            if st.button("← Back", key="back_from_initial_opinion"):
-                st.session_state.norm_selected = False
-                st.rerun()
-        with col2:
-            if st.button("Continue to Conversation", key="submit_initial_opinion", use_container_width=True, type="primary"):
-                st.session_state.initial_opinion = initial_opinion
-                st.session_state.initial_opinion_collected = True
-                st.rerun()
+        if st.button("Continue to Conversation", key="submit_initial_opinion", use_container_width=True, type="primary"):
+            st.session_state.initial_opinion = initial_opinion
+            st.session_state.initial_opinion_collected = True
+            st.rerun()
         
         st.markdown("</div>", unsafe_allow_html=True)
     

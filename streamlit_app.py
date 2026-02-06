@@ -647,6 +647,20 @@ try:
         </div>
         """, unsafe_allow_html=True)
         
+        st.markdown(f"""
+        <div style="margin-top: 2rem; padding: 1.5rem; background: white; border-radius: 8px;">
+            <h3>Summary of your session:</h3>
+            <ul>
+                <li>Prolific ID: {st.session_state.user_info.get('prolific_id', 'N/A')}</li>
+                <li>Topic: {PROMPTS[st.session_state.selected_prompt_key]['title']}</li>
+                <li>Norm: {NORMS[st.session_state.selected_norm_key]['title']}</li>
+                <li>Initial Opinion: {st.session_state.initial_opinion}/100</li>
+                <li>Final Opinion: {st.session_state.final_opinion}/100</li>
+                <li>Messages exchanged: {len(st.session_state.messages)}</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
 except KeyError as e:
     st.markdown(f"""
     <div class="error">

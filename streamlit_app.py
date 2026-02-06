@@ -549,14 +549,8 @@ try:
             st.session_state.conversation_ended = True
             st.rerun()
         
-        # Show message counter and end button after 3 messages
+        # Show end button after 3 messages
         if user_message_count >= 3:
-            st.markdown(f"""
-            <div class="message-counter">
-                Messages exchanged: {user_message_count}/10
-            </div>
-            """, unsafe_allow_html=True)
-            
             if st.button("End Conversation", key="end_conversation_btn", use_container_width=True, type="secondary"):
                 st.session_state.conversation_ended = True
                 st.rerun()
@@ -653,20 +647,6 @@ try:
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown(f"""
-        <div style="margin-top: 2rem; padding: 1.5rem; background: white; border-radius: 8px;">
-            <h3>Summary of your session:</h3>
-            <ul>
-                <li>Prolific ID: {st.session_state.user_info.get('prolific_id', 'N/A')}</li>
-                <li>Topic: {PROMPTS[st.session_state.selected_prompt_key]['title']}</li>
-                <li>Norm: {NORMS[st.session_state.selected_norm_key]['title']}</li>
-                <li>Initial Opinion: {st.session_state.initial_opinion}/100</li>
-                <li>Final Opinion: {st.session_state.final_opinion}/100</li>
-                <li>Messages exchanged: {len(st.session_state.messages)}</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-
 except KeyError as e:
     st.markdown(f"""
     <div class="error">

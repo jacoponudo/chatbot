@@ -77,6 +77,22 @@ st.markdown("""
         transform: translateY(-1px);
     }
     
+    button[kind="secondary"] {
+        background: #ffffff !important;
+        color: #4b5563 !important;
+        border: 1px solid #d1d5db !important;
+        padding: 0.6rem 1.25rem !important;
+        border-radius: 6px !important;
+        font-weight: 500 !important;
+        font-size: 0.875rem !important;
+        transition: all 0.2s ease;
+    }
+    
+    button[kind="secondary"]:hover {
+        background: #f9fafb !important;
+        border-color: #9ca3af !important;
+    }
+    
     .success-badge {
         background: #f0fdf4;
         color: #166534;
@@ -178,6 +194,16 @@ st.markdown("""
         font-size: 0.8rem;
         color: #999;
         margin-top: 0.5rem;
+    }
+    
+    .message-counter {
+        background: #f3f4f6;
+        color: #6b7280;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        text-align: center;
+        margin-bottom: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -518,14 +544,24 @@ try:
         # Conta i messaggi dell'utente
         user_message_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
         
-        # Mostra il pulsante per terminare la conversazione dopo 3 messaggi
+        # Check if user has reached 10 messages - automatically end conversation
+        if user_message_count >= 10:
+            st.session_state.conversation_ended = True
+            st.rerun()
+        
+        # Show message counter and end button after 3 messages
         if user_message_count >= 3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🛑 End Conversation and Proceed", key="end_conversation_btn", use_container_width=True):
+            st.markdown(f"""
+            <div class="message-counter">
+                Messages exchanged: {user_message_count}/10
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("End Conversation", key="end_conversation_btn", use_container_width=True, type="secondary"):
                 st.session_state.conversation_ended = True
                 st.rerun()
         
-        # Chat input
+        # Chat input - only show if conversation hasn't ended
         st.markdown("<br>", unsafe_allow_html=True)
         if prompt := st.chat_input("Your response..."):
             st.session_state.messages.append({
@@ -552,10 +588,6 @@ try:
             # Stream response
             with st.chat_message("assistant"):
                 response = st.write_stream(stream)
-                
-                if "ABRACADABRA" in response:
-                    st.session_state.conversation_ended = True
-                    st.rerun()
             
             response_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.markdown(f"<div class='timestamp'>{response_timestamp}</div>", unsafe_allow_html=True)

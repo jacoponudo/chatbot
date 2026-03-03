@@ -126,9 +126,83 @@ if "session_initialized" not in st.session_state:
     st.session_state["session_initialized"] = True
 
 # ============================================================================
-# PHASE 0 — WELCOME & INSTRUCTIONS
+# PHASE 0 — CONSENT FORM
 # ============================================================================
 if st.session_state.phase == 0:
+    st.markdown("## Thank you for joining our study!")
+    st.markdown("""
+**Before proceeding, please read carefully the information reported below.**
+
+**Aim of the Study**
+You are being invited to participate in a study of social norms. The purpose of this study is to analyze everyday norms – i.e., norms about behavior that many people perform regularly, and most people could perform if they wanted to – and to understand how people engage in conversations about these topics with an advanced AI.
+
+**What will I be asked to do?**
+If you agree to take part, you will be asked to answer a set of survey questions related to social norms. These include questions about how appropriate you and other people think behaviors are in different settings. Concerning questions about how other people perceive behaviors, you will receive a bonus payment if you make a correct guess. Next, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The study should take approximately *(da definire)* minutes to complete.
+
+**Can I change my mind?**
+Participation is voluntary and you can decline to participate in the research or any aspects of the research at any time without penalty. You may withdraw by simply closing the browser on the computer. It will not be possible for you to withdraw after the completion of the survey because your responses are anonymous.
+
+**Risks and benefits**
+There are no direct benefits to you as a participant. Study results will help inform the scholarly understanding of AI conversations about everyday norms work. There is a risk that some of the questions may be sensitive and/or could cause you psychological distress. You don't have to answer any questions you don't want to. There are questions where you will receive a bonus payment of £0.50 if you answer correctly (two questions, for a maximum of £1).
+
+**Privacy and data**
+The data that you provide will be anonymous so your responses cannot be linked back to you. The study data will be stored on an encrypted server at *(da definire)*. The anonymous dataset will be stored indefinitely and shared with other researchers for research and teaching purposes. We plan to publish the results of this study in academic journals and present them at conferences.
+
+**Any questions?**
+If you have any questions about the research, please contact *(da definire)*.
+
+By clicking "I agree" below you are indicating that you have read this information and agree to participate in this research study.
+""")
+
+    consent = st.radio(
+        "Do you agree to participate?",
+        options=["I agree", "I do not agree"],
+        index=None,
+        key="consent_radio"
+    )
+
+    if consent == "I agree":
+        if st.button("Continue"):
+            st.session_state.phase = 0.5
+            st.rerun()
+    elif consent == "I do not agree":
+        st.warning("Thank you for your time. You cannot proceed without consenting to participate.")
+        st.stop()
+
+# ============================================================================
+# PHASE 0.5 — DATA QUALITY CHECK
+# ============================================================================
+elif st.session_state.phase == 0.5:
+    st.markdown("## Before we begin")
+    st.markdown("""
+We care about the quality of our survey data. For us to fully understand your opinions, it is important that you provide careful answers to each question in this survey.
+
+**Do you commit to thoughtfully provide your best answers to the questions in this survey?**
+""")
+
+    quality = st.radio(
+        "Your answer:",
+        options=[
+            "I will try to provide my best answers",
+            "I will not provide my best answers",
+            "I can't promise either way"
+        ],
+        index=None,
+        key="quality_radio"
+    )
+
+    if quality == "I will try to provide my best answers":
+        if st.button("Continue"):
+            st.session_state.phase = 1
+            st.rerun()
+    elif quality in ["I will not provide my best answers", "I can't promise either way"]:
+        st.warning("Thank you for your time. We require committed participants to ensure data quality.")
+        st.stop()
+
+# ============================================================================
+# PHASE 1 — WELCOME & INSTRUCTIONS
+# ============================================================================
+elif st.session_state.phase == 1:
     st.markdown("## Welcome")
     st.markdown("""
     Thank you for taking part in this study.
@@ -141,7 +215,7 @@ if st.session_state.phase == 0:
     Please complete the study in one sitting and respond thoughtfully.
     """)
     if st.button("Begin"):
-        st.session_state.phase = 1
+        st.session_state.phase = 2
         st.rerun()
 
 # ============================================================================

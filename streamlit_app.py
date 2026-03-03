@@ -375,14 +375,6 @@ elif st.session_state.phase == 5:
 # PHASE 6 — ATTENTION CHECK
 # ============================================================================
 elif st.session_state.phase == 6:
-    last_ai = next(
-        (m["content"] for m in reversed(st.session_state.messages) if m["role"] == "assistant"),
-        ""
-    )
-    st.markdown("Please read the following excerpt from your conversation with the AI and answer the question below.")
-    if last_ai:
-        st.info(f"**AI's last message:**\n\n{last_ai}")
-
     st.markdown("**Which of the following best describes the main topic discussed with the AI?**")
     options = [n["title"] for n in st.session_state.sampled_norms] + ["None of the above / I don't remember"]
     st.radio("Select one:", options, key="att_check_response", label_visibility="collapsed")

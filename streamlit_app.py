@@ -30,20 +30,37 @@ def load_json(path):
         return json.load(f)
 
 PROMPTS = load_json("prompts.json")
-NORMS = load_json("norms.json")
+NORMS   = load_json("norms.json")
 
 # ============================================================================
-# GOOGLE SHEETS HELPERS
+# GOOGLE SHEETS — lazy (called only when needed, not at app start)
 # ============================================================================
-def check_prolific_id_exists(sheet, prolific_id):
-    values = sheet.col_values(1)
+def get_sheet():
+    if "gsheet" not in st.session_state:
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive",
+            ],
+        )
+        st.session_state.gsheet = (
+            gspread.authorize(creds)
+            .open_by_url(st.secrets["google_sheet_url"])
+            .sheet1
+        )
+    return st.session_state.gsheet
+
+def check_prolific_id_exists(prolific_id):
+    values = get_sheet().col_values(1)
     return prolific_id.lower() in [v.lower() for v in values[1:]]
 
-def get_least_used_combination(sheet, prompts, norms):
-    data = sheet.get_all_values()
+def get_least_used_combination():
+    sheet  = get_sheet()
+    data   = sheet.get_all_values()
     counts = defaultdict(int)
-    for p in prompts:
-        for n in norms:
+    for p in PROMPTS:
+        for n in NORMS:
             counts[(p, n)] = 0
     for row in data[1:]:
         if len(row) >= 3 and (row[1], row[2]) in counts:
@@ -51,62 +68,43 @@ def get_least_used_combination(sheet, prompts, norms):
     min_count = min(counts.values())
     return random.choice([k for k, v in counts.items() if v == min_count])
 
-def save_to_google_sheets(sheet, row):
-    sheet.append_row(row, value_input_option="RAW")
+def save_to_google_sheets(row):
+    get_sheet().append_row(row, value_input_option="RAW")
 
 # ============================================================================
-# SECRETS / CLIENTS
+# OPENAI CLIENT — lazy
 # ============================================================================
-creds = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],
-    scopes=[
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ],
-)
-sheet = gspread.authorize(creds).open_by_url(
-    st.secrets["google_sheet_url"]
-).sheet1
-
-openai_client = OpenAI(api_key=st.secrets["openai_api_key"])
+def get_openai():
+    if "openai_client" not in st.session_state:
+        st.session_state.openai_client = OpenAI(api_key=st.secrets["openai_api_key"])
+    return st.session_state.openai_client
 
 # ============================================================================
-# PROLIFIC ID CHECK AT THE VERY START
+# PROLIFIC ID  (read from URL only — no sheet call yet)
 # ============================================================================
 prolific_id = st.query_params.get("PROLIFIC_PID", "")
 if not prolific_id:
     st.error("Please access this study via Prolific to continue.")
     st.stop()
 
-if "prolific_id" not in st.session_state:
-    st.session_state.prolific_id = prolific_id
-
-if "pid_checked" not in st.session_state:
-    st.session_state.pid_checked = True
-    if check_prolific_id_exists(sheet, prolific_id):
-        st.error("This Prolific ID has already completed the study. You cannot participate again.")
-        st.stop()
-
 # ============================================================================
-# SESSION STATE DEFAULTS
+# SESSION STATE DEFAULTS  (run once)
 # ============================================================================
 if "session_initialized" not in st.session_state:
-    DEFAULTS = {
-        "phase": 0,
-        "messages": [],
-        "greeting_sent": False,
-        "conversation_ended": False,
-        "data_saved": False,
-        "generate_assistant": False,
-        "comp_response": None,
-        "engagement_text": None,
-    }
-    for k, v in DEFAULTS.items():
-        st.session_state[k] = v
-    st.session_state["session_initialized"] = True
+    st.session_state.update({
+        "session_initialized":        True,
+        "prolific_id":                prolific_id,
+        "phase":                      0,
+        "messages":                   [],
+        "greeting_sent":              False,
+        "data_saved":                 False,
+        "pending_user_message":       None,
+        "page_load_time":             time.time(),
+        "engagement_first_interaction": None,
+    })
 
 # ============================================================================
-# PHASE 0 — CONSENT FORM  (Pagina 1)
+# PHASE 0 — CONSENT FORM
 # ============================================================================
 if st.session_state.phase == 0:
     st.markdown("## Thank you for joining our study!")
@@ -144,6 +142,13 @@ By clicking "I agree" below you are indicating that you have read this informati
     if consent is not None:
         if consent == "I agree":
             if st.button("Continue"):
+                try:
+                    if check_prolific_id_exists(prolific_id):
+                        st.error("This Prolific ID has already completed the study.")
+                        st.stop()
+                except Exception as e:
+                    st.error(f"Could not verify Prolific ID. Please try again or contact us. Error: {e}")
+                    st.stop()
                 st.session_state.phase = 0.5
                 st.rerun()
         else:
@@ -151,7 +156,7 @@ By clicking "I agree" below you are indicating that you have read this informati
             st.stop()
 
 # ============================================================================
-# PHASE 0.5 — DATA QUALITY CHECK  (Pagina 1, seconda parte)
+# PHASE 0.5 — DATA QUALITY CHECK
 # ============================================================================
 elif st.session_state.phase == 0.5:
     st.markdown("We care about the quality of our survey data. For us to fully understand your opinions, it is important that you provide careful answers to each question in this survey.")
@@ -162,7 +167,7 @@ elif st.session_state.phase == 0.5:
         options=[
             "I will try to provide my best answers",
             "I will not provide my best answers",
-            "I can't promise either way"
+            "I can't promise either way",
         ],
         index=None,
         key="quality_radio"
@@ -178,27 +183,21 @@ elif st.session_state.phase == 0.5:
             st.stop()
 
 # ============================================================================
-# PHASE 1 — BACKGROUND QUESTION  (Pagina 2)
+# PHASE 1 — BACKGROUND QUESTION
 # ============================================================================
 elif st.session_state.phase == 1:
-    now = time.time()
-    if "page_load_time" not in st.session_state:
-        st.session_state.page_load_time = now
-    if "engagement_first_interaction" not in st.session_state:
-        st.session_state.engagement_first_interaction = None
-
     st.markdown("Please answer the question below in a few sentences. There is no right or wrong answer.")
     st.markdown("**If you could change one thing about the world, what would it be and why? Please elaborate in a few sentences so we can better understand your perspective.**")
 
-    def engagement_interaction_callback():
+    def _engagement_callback():
         if st.session_state.engagement_first_interaction is None:
             st.session_state.engagement_first_interaction = time.time()
 
-    text = st.text_area(
+    st.text_area(
         "Your answer:",
         height=180,
         key="engagement_text",
-        on_change=engagement_interaction_callback,
+        on_change=_engagement_callback,
         label_visibility="collapsed"
     )
 
@@ -207,51 +206,45 @@ elif st.session_state.phase == 1:
         if not response:
             st.warning("Please provide a response before continuing.")
             st.stop()
-        st.session_state["engagement_text_saved"] = response
-        st.session_state.engagement_word_count = len(response.split())
-
-        now2 = time.time()
-        st.session_state.parallel_engagement_time = now2 - st.session_state.page_load_time
-        st.session_state.sequential_engagement_time = now2 - st.session_state.page_load_time
+        now = time.time()
+        st.session_state.engagement_text_saved       = response
+        st.session_state.engagement_word_count       = len(response.split())
+        st.session_state.parallel_engagement_time    = now - st.session_state.page_load_time
+        st.session_state.sequential_engagement_time  = now - st.session_state.page_load_time
         st.session_state.interaction_engagement_time = (
-            (now2 - st.session_state.engagement_first_interaction)
+            now - st.session_state.engagement_first_interaction
             if st.session_state.engagement_first_interaction else None
         )
         st.session_state.phase = 2
         st.rerun()
 
 # ============================================================================
-# PHASE 2 — INITIAL APPROPRIATENESS RATINGS  (Pagina 3)
+# PHASE 2 — INITIAL APPROPRIATENESS RATINGS
 # ============================================================================
 elif st.session_state.phase == 2:
     if "prompt_key" not in st.session_state:
-        prompt_key, norm_key = get_least_used_combination(sheet, PROMPTS, NORMS)
+        prompt_key, norm_key = get_least_used_combination()
         st.session_state.prompt_key = prompt_key
-        st.session_state.norm_key = norm_key
+        st.session_state.norm_key   = norm_key
         st.session_state.start_time = time.time()
 
     if "sampled_norms" not in st.session_state:
-        norm_data = NORMS[st.session_state.norm_key]
-        new_norms = {k: v for k, v in NORMS.items() if k != st.session_state.norm_key}
-        sampled_extra = random.sample(list(new_norms.values()), min(4, len(new_norms)))
-        sampled_norms = sampled_extra + [norm_data]
-        random.shuffle(sampled_norms)
-        st.session_state.sampled_norms = sampled_norms
-
-    sampled_norms = st.session_state.sampled_norms
+        norm_data   = NORMS[st.session_state.norm_key]
+        other_norms = [v for k, v in NORMS.items() if k != st.session_state.norm_key]
+        sampled     = random.sample(other_norms, min(4, len(other_norms))) + [norm_data]
+        random.shuffle(sampled)
+        st.session_state.sampled_norms = sampled
 
     st.markdown("""From various sources in our everyday lives we have all developed a subjective "impression" or "feeling" for the appropriateness of any given behavior in a particular situation. In this study, we are interested in your judgment of the appropriateness of some particular behaviors in some particular settings.
 
 Your task in each case is simply to rate, on a scale from 0 (completely inappropriate) to 100 (completely appropriate), the appropriateness of the particular behavior in the situation that is given.""")
 
     opinions = {}
-    for i, norm in enumerate(sampled_norms):
+    for i, norm in enumerate(st.session_state.sampled_norms):
         st.markdown(f"**How appropriate or inappropriate is it to {norm['title']}?**")
         opinions[norm['title']] = st.slider(
-            f"0 = Completely inappropriate — 100 = Completely appropriate",
-            0, 100, 50,
-            key=f"slider_{i}",
-            label_visibility="visible"
+            "0 = Completely inappropriate — 100 = Completely appropriate",
+            0, 100, 50, key=f"slider_{i}"
         )
 
     if st.button("Continue"):
@@ -260,24 +253,20 @@ Your task in each case is simply to rate, on a scale from 0 (completely inapprop
         st.rerun()
 
 # ============================================================================
-# PHASE 3 — EXPECTED OTHERS' RATINGS  (Pagina 4)
+# PHASE 3 — EXPECTED OTHERS' RATINGS (initial)
 # ============================================================================
 elif st.session_state.phase == 3:
-    sampled_norms = st.session_state.sampled_norms
-
     st.markdown("""We will now ask you what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors from 0 (completely inappropriate) to 100 (completely appropriate).
 
 We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±3), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
 
     opinions_others = {}
-    for i, norm in enumerate(sampled_norms):
+    for i, norm in enumerate(st.session_state.sampled_norms):
         st.markdown(f"**{norm['title']}**")
         st.markdown("Other respondents' average appropriateness rating:")
         opinions_others[norm['title']] = st.slider(
-            f"0 = Completely inappropriate — 100 = Completely appropriate",
-            0, 100, 50,
-            key=f"group_opinion_slider_{i}",
-            label_visibility="visible"
+            "0 = Completely inappropriate — 100 = Completely appropriate",
+            0, 100, 50, key=f"group_slider_{i}"
         )
 
     if st.button("Continue"):
@@ -286,7 +275,7 @@ We will calculate the mean responses provided by the other participants and comp
         st.rerun()
 
 # ============================================================================
-# PHASE 4 — INSTRUCTIONS FOR CONVERSATION  (Pagina 5)
+# PHASE 4 — INSTRUCTIONS FOR CONVERSATION
 # ============================================================================
 elif st.session_state.phase == 4:
     st.markdown("""Now, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The purpose of this dialogue is to see how humans and AI interact. Please be open and honest in your responses. Remember that the AI is neutral and non-judgmental, and your participation is confidential. When the conversation begins, you should see an AI icon with chat bubbles "..." indicating it's generating responses. It can sometimes take up to 30s. If you don't see any icons or if it's taking too long to generate responses, try refreshing the page. If you run into further issues, please let us know.
@@ -300,28 +289,30 @@ When the conversation is over, you should see a message at the bottom: **Scroll 
         st.rerun()
 
 # ============================================================================
-# PHASE 5 — CONVERSATION WITH LLM  (Pagina 6)
+# PHASE 5 — CONVERSATION WITH LLM
 # ============================================================================
 elif st.session_state.phase == 5:
     prompt_data = PROMPTS[st.session_state.prompt_key]
-    norm_data = NORMS[st.session_state.norm_key]
-    initial_opinion_treatment = st.session_state.initial_opinion.get(norm_data["title"], 50)
-    system_prompt = prompt_data["system_prompt_template"].replace(
-        "{NORM_DESCRIPTION}", norm_data["title"]
-    ).replace("{INITIAL_OPINION}", str(initial_opinion_treatment))
+    norm_data   = NORMS[st.session_state.norm_key]
+    initial_val = st.session_state.initial_opinion.get(norm_data["title"], 50)
+    system_prompt = (
+        prompt_data["system_prompt_template"]
+        .replace("{NORM_DESCRIPTION}", norm_data["title"])
+        .replace("{INITIAL_OPINION}", str(initial_val))
+    )
 
     if not st.session_state.greeting_sent:
-        reply = openai_client.chat.completions.create(
+        reply = get_openai().chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Start the discussion"}
+                {"role": "user",   "content": "Start the discussion"},
             ]
         )
         st.session_state.messages.append({
             "role": "assistant",
             "content": reply.choices[0].message.content,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         })
         st.session_state.greeting_sent = True
         st.rerun()
@@ -330,17 +321,14 @@ elif st.session_state.phase == 5:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
-    assistant_msgs = [m for m in st.session_state.messages if m["role"] == "assistant"]
-    round_count = max(0, len(assistant_msgs) - 1)
-
-    if "pending_user_message" not in st.session_state:
-        st.session_state.pending_user_message = None
+    assistant_count = sum(1 for m in st.session_state.messages if m["role"] == "assistant")
+    round_count     = max(0, assistant_count - 1)
 
     if user_input := st.chat_input("Type your response here"):
         st.session_state.pending_user_message = {
             "role": "user",
             "content": user_input,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
         st.rerun()
 
@@ -353,31 +341,30 @@ elif st.session_state.phase == 5:
 
         if round_count < 10:
             with st.chat_message("assistant"):
-                stream = openai_client.chat.completions.create(
+                stream = get_openai().chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[{"role": "system", "content": system_prompt}] +
-                             [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
-                    stream=True
+                    messages=[{"role": "system", "content": system_prompt}]
+                             + [{"role": m["role"], "content": m["content"]}
+                                for m in st.session_state.messages],
+                    stream=True,
                 )
                 reply_text = st.write_stream(stream)
-
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": reply_text,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             })
-            st.rerun()
         else:
-            final_message = "Thank you for your thoughtful responses! The discussion is now complete. Please scroll down and proceed to the next section."
+            closing = "Thank you for your thoughtful responses! The discussion is now complete. Please scroll down and proceed to the next section."
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": final_message,
-                "timestamp": datetime.now().isoformat()
+                "content": closing,
+                "timestamp": datetime.now().isoformat(),
             })
-            st.rerun()
+        st.rerun()
 
-    user_msgs = [m for m in st.session_state.messages if m["role"] == "user"]
-    if len(user_msgs) >= 2 and st.session_state.phase == 5:
+    user_msg_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
+    if user_msg_count >= 2:
         st.markdown("---")
         st.markdown("*Scroll down and proceed to the next section.*")
         if st.button("End Discussion & Continue"):
@@ -385,55 +372,43 @@ elif st.session_state.phase == 5:
             st.rerun()
 
 # ============================================================================
-# PHASE 6 — ATTENTION CHECK  (Pagina 7)
+# PHASE 6 — ATTENTION CHECK
 # ============================================================================
 elif st.session_state.phase == 6:
-    norm_data = NORMS[st.session_state.norm_key]
-
-    # Build comprehension question from last assistant message
-    last_assistant_msgs = [m for m in st.session_state.messages if m["role"] == "assistant"]
-    last_ai_text = last_assistant_msgs[-1]["content"] if last_assistant_msgs else ""
-
-    st.markdown("""Please read the following excerpt from your conversation with the AI and answer the question below.""")
-
-    if last_ai_text:
-        st.info(f"**AI's last message:**\n\n{last_ai_text}")
+    last_ai = next(
+        (m["content"] for m in reversed(st.session_state.messages) if m["role"] == "assistant"),
+        ""
+    )
+    st.markdown("Please read the following excerpt from your conversation with the AI and answer the question below.")
+    if last_ai:
+        st.info(f"**AI's last message:**\n\n{last_ai}")
 
     st.markdown("**Which of the following best describes the main topic discussed with the AI?**")
-
-    att_check_options = [norm["title"] for norm in st.session_state.sampled_norms] + ["None of the above / I don't remember"]
-    att_check_response = st.radio(
-        "Select one:",
-        att_check_options,
-        key="att_check_response",
-        label_visibility="collapsed"
-    )
+    options = [n["title"] for n in st.session_state.sampled_norms] + ["None of the above / I don't remember"]
+    st.radio("Select one:", options, key="att_check_response", label_visibility="collapsed")
 
     if st.button("Continue"):
-        st.session_state["att_check_response_saved"] = st.session_state.get("att_check_response", "")
+        if not st.session_state.get("att_check_response"):
+            st.warning("Please select an answer before continuing.")
+            st.stop()
+        st.session_state.att_check_response_saved = st.session_state.att_check_response
         st.session_state.phase = 7
         st.rerun()
 
 # ============================================================================
-# PHASE 7 — FINAL APPROPRIATENESS RATINGS  (Pagina 8)
+# PHASE 7 — FINAL APPROPRIATENESS RATINGS
 # ============================================================================
 elif st.session_state.phase == 7:
-    sampled_norms = st.session_state.sampled_norms
-    initial_opinions = st.session_state.initial_opinion
-
     st.markdown("We ask you again to rate, on a scale from 0 (completely inappropriate) to 100 (completely appropriate), the appropriateness of these behaviors.")
 
     final_opinions = {}
-    for i, norm in enumerate(sampled_norms):
+    for i, norm in enumerate(st.session_state.sampled_norms):
         title = norm["title"]
-        initial_value = initial_opinions.get(title, 50)
+        initial_val = st.session_state.initial_opinion.get(title, 50)
         st.markdown(f"**How appropriate or inappropriate is it to {title}?**")
         final_opinions[title] = st.slider(
             "0 = Completely inappropriate — 100 = Completely appropriate",
-            0, 100,
-            initial_value,
-            key=f"final_slider_{i}",
-            label_visibility="visible"
+            0, 100, initial_val, key=f"final_slider_{i}"
         )
 
     if st.button("Continue"):
@@ -442,24 +417,20 @@ elif st.session_state.phase == 7:
         st.rerun()
 
 # ============================================================================
-# PHASE 8 — FINAL EXPECTED OTHERS' RATINGS  (Pagina 9)
+# PHASE 8 — FINAL EXPECTED OTHERS' RATINGS
 # ============================================================================
 elif st.session_state.phase == 8:
-    sampled_norms = st.session_state.sampled_norms
-
     st.markdown("""We will now ask you again what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors from 0 (completely inappropriate) to 100 (completely appropriate).
 
 We will calculate the mean responses provided by the other participants the second time they were asked and compare them with the estimate you provided. If your estimate is correct (±3), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
 
     opinions_others_final = {}
-    for i, norm in enumerate(sampled_norms):
+    for i, norm in enumerate(st.session_state.sampled_norms):
         st.markdown(f"**{norm['title']}**")
         st.markdown("Other respondents' average appropriateness rating:")
         opinions_others_final[norm['title']] = st.slider(
             "0 = Completely inappropriate — 100 = Completely appropriate",
-            0, 100, 50,
-            key=f"group_opinion_final_slider_{i}",
-            label_visibility="visible"
+            0, 100, 50, key=f"group_final_slider_{i}"
         )
 
     if st.button("Continue"):
@@ -468,7 +439,7 @@ We will calculate the mean responses provided by the other participants the seco
         st.rerun()
 
 # ============================================================================
-# PHASE 9 — TIGHTNESS SCALE  (Pagina 10)
+# PHASE 9 — TIGHTNESS SCALE
 # ============================================================================
 elif st.session_state.phase == 9:
     st.markdown("""The following statements refer to the country in which you currently live, as a whole. Indicate whether you agree or disagree with the statements using the following scale. Note that the statements sometimes refer to "social norms," which are generally unwritten standards of behavior.""")
@@ -482,284 +453,183 @@ elif st.session_state.phase == 9:
         "In this country, people almost always comply with social norms.",
         "In this country, people have very little freedom in deciding how they want to behave in most situations.",
     ]
+    scale_labels = ["Strongly disagree", "Moderately disagree", "Slightly disagree",
+                    "Slightly agree", "Moderately agree", "Strongly agree"]
 
-    scale_labels = ["Strongly disagree", "Moderately disagree", "Slightly disagree", "Slightly agree", "Moderately agree", "Strongly agree"]
-    scale_values = [1, 2, 3, 4, 5, 6]
-
-    tightness_responses = {}
     for i, item in enumerate(tightness_items):
         st.markdown(f"**{item}**")
-        cols = st.columns(6)
-        selected = st.session_state.get(f"tight_{i}", None)
-        for j, (label, val) in enumerate(zip(scale_labels, scale_values)):
+        cols     = st.columns(6)
+        selected = st.session_state.get(f"tight_{i}")
+        for j, label in enumerate(scale_labels):
+            val = j + 1
             with cols[j]:
                 if st.button(label, key=f"tight_{i}_{val}", use_container_width=True,
                              type="primary" if selected == val else "secondary"):
                     st.session_state[f"tight_{i}"] = val
                     st.rerun()
-        if selected:
-            tightness_responses[item] = selected
         st.markdown("")
 
     st.markdown("---")
-    tightness_open = st.text_area(
+    st.text_area(
         "Is there anything you would like to add or do you want to clarify about your answers?",
-        height=100,
-        key="tightness_open"
+        height=100, key="tightness_open"
     )
 
     if st.button("Continue"):
-        # Check all items answered
         missing = [i for i in range(len(tightness_items)) if not st.session_state.get(f"tight_{i}")]
         if missing:
             st.warning("Please respond to all statements before continuing.")
             st.stop()
-        for i, item in enumerate(tightness_items):
-            tightness_responses[item] = st.session_state.get(f"tight_{i}")
-        st.session_state.tightness_responses = tightness_responses
-        st.session_state.tightness_open = st.session_state.get("tightness_open", "")
+        st.session_state.tightness_responses = {
+            item: st.session_state[f"tight_{i}"]
+            for i, item in enumerate(tightness_items)
+        }
         st.session_state.phase = 10
         st.rerun()
 
 # ============================================================================
-# PHASE 10 — CONVERSATION PERCEPTION  (Pagina 11)
+# PHASE 10 — CONVERSATION PERCEPTION
 # ============================================================================
 elif st.session_state.phase == 10:
-    st.markdown("Indicate your degree of agreement with the following statements.")
-
-    st.markdown("#### Involvement")
-    st.markdown("The messages I read during the conversation with the AI:")
 
     involvement_items = [
-        ("They got me involved.", "involvement_0"),
+        ("They got me involved.",       "involvement_0"),
         ("They seemed relevant to me.", "involvement_1"),
-        ("They interested me.", "involvement_2"),
+        ("They interested me.",         "involvement_2"),
     ]
-
-    involvement_responses = {}
-    for label, key in involvement_items:
-        st.markdown(f"**{label}**")
-        cols = st.columns(7)
-        for j in range(1, 8):
-            with cols[j - 1]:
-                col_label = str(j)
-                if j == 1:
-                    col_label = f"1\nTotally disagree"
-                elif j == 7:
-                    col_label = f"7\nTotally agree"
-                selected = st.session_state.get(key)
-                if st.button(str(j), key=f"{key}_{j}", use_container_width=True,
-                             type="primary" if selected == j else "secondary"):
-                    st.session_state[key] = j
-                    st.rerun()
-        if st.session_state.get(key):
-            involvement_responses[label] = st.session_state[key]
-        st.markdown("")
-
-    st.markdown("#### Perceived Threat")
-    st.markdown("The messages I read during the conversation with the AI:")
-
     threat_items = [
-        ("They tried to manipulate me.", "threat_0"),
-        ("They tried to pressure me.", "threat_1"),
+        ("They tried to manipulate me.",            "threat_0"),
+        ("They tried to pressure me.",              "threat_1"),
         ("They undermined my sense of self-worth.", "threat_2"),
-        ("They made me feel less than capable.", "threat_3"),
-        ("They made me think I should change.", "threat_4"),
+        ("They made me feel less than capable.",    "threat_3"),
+        ("They made me think I should change.",     "threat_4"),
     ]
-
-    threat_responses = {}
-    for label, key in threat_items:
-        st.markdown(f"**{label}**")
-        cols = st.columns(7)
-        for j in range(1, 8):
-            with cols[j - 1]:
-                selected = st.session_state.get(key)
-                if st.button(str(j), key=f"{key}_{j}", use_container_width=True,
-                             type="primary" if selected == j else "secondary"):
-                    st.session_state[key] = j
-                    st.rerun()
-        if st.session_state.get(key):
-            threat_responses[label] = st.session_state[key]
-        st.markdown("")
-
-    st.markdown("#### Evaluation of the Source")
-    st.markdown("To what extent the source of these messages is:")
-
     source_items = [
-        ("Reliable", "source_0"),
-        ("Trusted", "source_1"),
-        ("Honest", "source_2"),
+        ("Reliable",  "source_0"),
+        ("Trusted",   "source_1"),
+        ("Honest",    "source_2"),
         ("Competent", "source_3"),
-        ("Expert", "source_4"),
-        ("Informed", "source_5"),
+        ("Expert",    "source_4"),
+        ("Informed",  "source_5"),
     ]
 
-    source_responses = {}
-    for label, key in source_items:
-        st.markdown(f"**{label}**")
-        cols = st.columns(7)
-        for j in range(1, 8):
-            with cols[j - 1]:
-                selected = st.session_state.get(key)
-                if st.button(str(j), key=f"{key}_{j}", use_container_width=True,
-                             type="primary" if selected == j else "secondary"):
-                    st.session_state[key] = j
-                    st.rerun()
-        if st.session_state.get(key):
-            source_responses[label] = st.session_state[key]
-        st.markdown("")
+    def _render_7pt(items, header):
+        st.markdown(f"#### {header}")
+        for label, key in items:
+            st.markdown(f"**{label}**")
+            cols     = st.columns(7)
+            selected = st.session_state.get(key)
+            for j in range(1, 8):
+                with cols[j - 1]:
+                    if st.button(str(j), key=f"{key}_{j}", use_container_width=True,
+                                 type="primary" if selected == j else "secondary"):
+                        st.session_state[key] = j
+                        st.rerun()
+            st.markdown("")
 
+    st.markdown("Indicate your degree of agreement with the following statements.")
+    _render_7pt(involvement_items, "Involvement — The messages I read during the conversation with the AI:")
+    _render_7pt(threat_items,      "Perceived Threat — The messages I read during the conversation with the AI:")
+    _render_7pt(source_items,      "Evaluation of the Source — To what extent the source of these messages is:")
     st.markdown("*Scale: 1 = Totally disagree — 7 = Totally agree*")
 
     if st.button("Continue"):
-        all_keys = (
-            [k for _, k in involvement_items] +
-            [k for _, k in threat_items] +
-            [k for _, k in source_items]
-        )
-        missing = [k for k in all_keys if not st.session_state.get(k)]
+        all_keys = [k for _, k in involvement_items + threat_items + source_items]
+        missing  = [k for k in all_keys if not st.session_state.get(k)]
         if missing:
             st.warning("Please respond to all statements before continuing.")
             st.stop()
         st.session_state.involvement_responses = {l: st.session_state[k] for l, k in involvement_items}
-        st.session_state.threat_responses = {l: st.session_state[k] for l, k in threat_items}
-        st.session_state.source_responses = {l: st.session_state[k] for l, k in source_items}
+        st.session_state.threat_responses      = {l: st.session_state[k] for l, k in threat_items}
+        st.session_state.source_responses      = {l: st.session_state[k] for l, k in source_items}
         st.session_state.phase = 11
         st.rerun()
 
 # ============================================================================
-# PHASE 11 — PURPOSE OF STUDY  (Pagina 12)
+# PHASE 11 — PURPOSE OF STUDY
 # ============================================================================
 elif st.session_state.phase == 11:
     st.markdown("**What do you think is the purpose of this study?**")
-
-    purpose_text = st.text_area(
-        "Please write your answer below:",
-        height=150,
-        key="purpose_text",
-        label_visibility="collapsed"
-    )
+    st.text_area("Your answer:", height=150, key="purpose_text", label_visibility="collapsed")
 
     if st.button("Continue"):
         response = st.session_state.get("purpose_text", "").strip()
         if not response:
             st.warning("Please write your answer before continuing.")
             st.stop()
-        st.session_state.purpose_text = response
+        st.session_state.purpose_text_saved = response
         st.session_state.phase = 12
         st.rerun()
 
 # ============================================================================
-# PHASE 12 — DEMOGRAPHIC QUESTIONS  (Pagina 13)
+# PHASE 12 — DEMOGRAPHIC QUESTIONS
 # ============================================================================
 elif st.session_state.phase == 12:
     st.markdown("Please answer the following questions about yourself.")
     st.markdown("---")
 
-    # Age
     age = st.selectbox(
         "How old are you, in years?",
-        options=["Select..."] + list(range(18, 101)),
-        key="demo_age"
+        ["Select..."] + list(range(18, 101)), key="demo_age"
     )
-
-    # Location in UK
     uk_location = st.selectbox(
         "Where do you live (in the UK)?",
-        options=["Select...", "England", "Wales", "Scotland", "Northern Ireland"],
+        ["Select...", "England", "Wales", "Scotland", "Northern Ireland"],
         key="demo_location"
     )
-
-    # Gender
     st.markdown("**What is your gender?**")
-    gender = st.radio(
-        "Gender:",
-        options=["Male", "Female", "Other"],
-        horizontal=True,
-        key="demo_gender",
-        label_visibility="collapsed"
-    )
-
-    # Student
+    gender = st.radio("Gender:", ["Male", "Female", "Other"],
+                      horizontal=True, key="demo_gender", label_visibility="collapsed")
     st.markdown("**Are you currently enrolled as a student?**")
-    student = st.radio(
-        "Student:",
-        options=["Yes", "No"],
-        horizontal=True,
-        key="demo_student",
-        label_visibility="collapsed"
-    )
-
-    # Education
+    student = st.radio("Student:", ["Yes", "No"],
+                       horizontal=True, key="demo_student", label_visibility="collapsed")
     education = st.selectbox(
         "What is the highest level of education you have completed, or the highest degree you have received?",
-        options=[
-            "Select...",
-            "Less than high school degree (less than 12 years in school)",
-            "High school graduate (12 or more years in school)",
-            "Some college but no degree",
-            "Bachelor's/Associate degree",
-            "Master's degree",
-            "Doctoral degree"
-        ],
+        ["Select...",
+         "Less than high school degree (less than 12 years in school)",
+         "High school graduate (12 or more years in school)",
+         "Some college but no degree",
+         "Bachelor's/Associate degree",
+         "Master's degree",
+         "Doctoral degree"],
         key="demo_education"
     )
 
-    # Political orientation
     st.markdown("**Here is a 7-point scale on which the political views that people might hold are arranged from extremely liberal (left) to extremely conservative (right). Where would you place yourself on this scale?**")
-    col1, col2, col3 = st.columns([1, 6, 1])
-    with col1:
-        st.markdown("Extremely liberal (left)")
-    with col2:
-        politics = st.slider(
-            "Political orientation:",
-            1, 7, 4,
-            key="demo_politics",
-            label_visibility="collapsed"
-        )
-    with col3:
-        st.markdown("Extremely conservative (right)")
+    col_l, col_m, col_r = st.columns([2, 5, 2])
+    with col_l:
+        st.markdown("<div style='text-align:right;padding-top:28px'>Extremely liberal (left)</div>",
+                    unsafe_allow_html=True)
+    with col_m:
+        politics = st.slider("Politics", 1, 7, 4, key="demo_politics", label_visibility="collapsed")
+    with col_r:
+        st.markdown("<div style='padding-top:28px'>Extremely conservative (right)</div>",
+                    unsafe_allow_html=True)
 
-    # Social ladder
-    st.markdown("""**Think of this ladder as representing where people stand in the UK. At the top of the ladder are the people who are the best off – those who have the most money, the most education, and the most respected jobs. At the bottom are the people who are the worst off – those who have the least money, least education, the least respected jobs, or no job. The higher up you are on this ladder, the closer you are to the people at the very top; the lower you are, the closer you are to the people at the very bottom.**
-
-Where would you place yourself on this ladder?""")
-
+    st.markdown("""**Think of this ladder as representing where people stand in the UK. At the top of the ladder are the people who are the best off – those who have the most money, the most education, and the most respected jobs. At the bottom are the people who are the worst off – those who have the least money, least education, the least respected jobs, or no job. Where would you place yourself on this ladder?**""")
     ladder = st.select_slider(
         "Social ladder position (1 = bottom, 10 = top):",
-        options=list(range(1, 11)),
-        value=5,
-        key="demo_ladder",
-        label_visibility="visible"
+        options=list(range(1, 11)), value=5, key="demo_ladder"
     )
 
     if st.button("Continue"):
         errors = []
-        if age == "Select...":
-            errors.append("Please select your age.")
-        if uk_location == "Select...":
-            errors.append("Please select where you live in the UK.")
-        if education == "Select...":
-            errors.append("Please select your education level.")
+        if age         == "Select...": errors.append("Please select your age.")
+        if uk_location == "Select...": errors.append("Please select where you live in the UK.")
+        if education   == "Select...": errors.append("Please select your education level.")
         if errors:
-            for e in errors:
-                st.warning(e)
+            for e in errors: st.warning(e)
             st.stop()
-
         st.session_state.demographics = {
-            "age": age,
-            "uk_location": uk_location,
-            "gender": gender,
-            "student": student,
-            "education": education,
-            "politics": politics,
-            "social_ladder": ladder
+            "age": age, "uk_location": uk_location, "gender": gender,
+            "student": student, "education": education,
+            "politics": politics, "social_ladder": ladder,
         }
         st.session_state.phase = 13
         st.rerun()
 
 # ============================================================================
-# PHASE 13 — DEBRIEFING  (Pagina 14)
+# PHASE 13 — DEBRIEFING
 # ============================================================================
 elif st.session_state.phase == 13:
     st.markdown("## Debriefing")
@@ -780,90 +650,104 @@ We hope that our research can contribute to a better understanding of how to mak
         st.rerun()
 
 # ============================================================================
-# PHASE 14 — FINAL COMMENTS & SAVE DATA  (Pagina 15)
+# PHASE 14 — FINAL COMMENTS  +  SINGLE SAVE TO GOOGLE SHEETS
 # ============================================================================
 elif st.session_state.phase == 14 and not st.session_state.data_saved:
     st.markdown("You may optionally leave any comments about the study in the box below.")
-
-    final_comments = st.text_area(
-        "Comments (optional):",
-        height=120,
-        key="final_comments",
-        label_visibility="collapsed"
-    )
+    st.text_area("Comments (optional):", height=120, key="final_comments", label_visibility="collapsed")
 
     if st.button("Finish & Submit"):
-        total_duration = time.time() - st.session_state.start_time
-
+        demographics    = st.session_state.get("demographics", {})
+        total_duration  = time.time() - st.session_state.start_time
         user_word_count = sum(
             len(m["content"].split())
-            for m in st.session_state.messages
-            if m["role"] == "user"
+            for m in st.session_state.messages if m["role"] == "user"
         )
 
-        demographics = st.session_state.get("demographics", {})
-
         row = [
-            st.session_state.prolific_id,
-            st.session_state.prompt_key,
-            st.session_state.norm_key,
-            # Initial opinions (Pagina 3)
-            json.dumps(st.session_state.initial_opinion, ensure_ascii=False),
-            # Expected others' opinions (Pagina 4)
-            json.dumps(st.session_state.opinions_others, ensure_ascii=False),
-            # Conversation (Pagina 6)
-            json.dumps(st.session_state.messages, ensure_ascii=False),
-            # Attention check (Pagina 7)
-            str(st.session_state.get("att_check_response_saved", "")),
-            # Final opinions (Pagina 8)
-            json.dumps(st.session_state.final_opinion, ensure_ascii=False),
-            # Final expected others' opinions (Pagina 9)
-            json.dumps(st.session_state.opinions_others_final, ensure_ascii=False),
-            # Tightness (Pagina 10)
-            json.dumps(st.session_state.get("tightness_responses", {}), ensure_ascii=False),
-            str(st.session_state.get("tightness_open", "")),
-            # Conversation perception (Pagina 11)
-            json.dumps(st.session_state.get("involvement_responses", {}), ensure_ascii=False),
-            json.dumps(st.session_state.get("threat_responses", {}), ensure_ascii=False),
-            json.dumps(st.session_state.get("source_responses", {}), ensure_ascii=False),
-            # Purpose of study (Pagina 12)
-            str(st.session_state.get("purpose_text", "")),
-            # Demographics (Pagina 13)
-            str(demographics.get("age", "")),
-            str(demographics.get("uk_location", "")),
-            str(demographics.get("gender", "")),
-            str(demographics.get("student", "")),
-            str(demographics.get("education", "")),
-            str(demographics.get("politics", "")),
-            str(demographics.get("social_ladder", "")),
-            # Background question (Pagina 2)
-            str(st.session_state.get("engagement_text_saved", "")),
-            st.session_state.get("engagement_word_count", 0),
-            # Final comments (Pagina 15)
-            str(st.session_state.get("final_comments", "")),
-            # Conversation stats
-            len([m for m in st.session_state.messages if m["role"] == "user"]),
-            user_word_count,
-            total_duration,
-            datetime.now().isoformat()
+            # ── Identity ──────────────────────────────────────────────────
+            st.session_state.prolific_id,                                               # col 1
+            st.session_state.prompt_key,                                                # col 2
+            st.session_state.norm_key,                                                  # col 3
+
+            # ── Pagina 3: Initial appropriateness ─────────────────────────
+            json.dumps(st.session_state.get("initial_opinion", {}),       ensure_ascii=False),  # col 4
+
+            # ── Pagina 4: Initial expected others ─────────────────────────
+            json.dumps(st.session_state.get("opinions_others", {}),       ensure_ascii=False),  # col 5
+
+            # ── Pagina 6: Conversation ────────────────────────────────────
+            json.dumps(st.session_state.get("messages", []),              ensure_ascii=False),  # col 6
+
+            # ── Pagina 7: Attention check ─────────────────────────────────
+            str(st.session_state.get("att_check_response_saved", "")),                 # col 7
+
+            # ── Pagina 8: Final appropriateness ───────────────────────────
+            json.dumps(st.session_state.get("final_opinion", {}),         ensure_ascii=False),  # col 8
+
+            # ── Pagina 9: Final expected others ───────────────────────────
+            json.dumps(st.session_state.get("opinions_others_final", {}), ensure_ascii=False),  # col 9
+
+            # ── Pagina 10: Tightness ──────────────────────────────────────
+            json.dumps(st.session_state.get("tightness_responses", {}),   ensure_ascii=False),  # col 10
+            str(st.session_state.get("tightness_open", "")),                           # col 11
+
+            # ── Pagina 11: Conversation perception ───────────────────────
+            json.dumps(st.session_state.get("involvement_responses", {}), ensure_ascii=False),  # col 12
+            json.dumps(st.session_state.get("threat_responses", {}),      ensure_ascii=False),  # col 13
+            json.dumps(st.session_state.get("source_responses", {}),      ensure_ascii=False),  # col 14
+
+            # ── Pagina 12: Purpose of study ───────────────────────────────
+            str(st.session_state.get("purpose_text_saved", "")),                       # col 15
+
+            # ── Pagina 13: Demographics ───────────────────────────────────
+            str(demographics.get("age",           "")),                                # col 16
+            str(demographics.get("uk_location",   "")),                                # col 17
+            str(demographics.get("gender",        "")),                                # col 18
+            str(demographics.get("student",       "")),                                # col 19
+            str(demographics.get("education",     "")),                                # col 20
+            str(demographics.get("politics",      "")),                                # col 21
+            str(demographics.get("social_ladder", "")),                                # col 22
+
+            # ── Pagina 2: Background question ─────────────────────────────
+            str(st.session_state.get("engagement_text_saved", "")),                    # col 23
+            str(st.session_state.get("engagement_word_count", 0)),                     # col 24
+
+            # ── Pagina 15: Final comments ─────────────────────────────────
+            str(st.session_state.get("final_comments", "")),                           # col 25
+
+            # ── Timing & conversation stats ───────────────────────────────
+            str(st.session_state.get("parallel_engagement_time",    "")),              # col 26
+            str(st.session_state.get("sequential_engagement_time",  "")),              # col 27
+            str(st.session_state.get("interaction_engagement_time", "")),              # col 28
+            str(sum(1 for m in st.session_state.messages if m["role"] == "user")),     # col 29
+            str(user_word_count),                                                       # col 30
+            str(round(total_duration, 2)),                                              # col 31
+            datetime.now().isoformat(),                                                 # col 32
         ]
 
-        save_to_google_sheets(sheet, row)
+        try:
+            save_to_google_sheets(row)
+        except Exception as e:
+            st.error(f"There was an error saving your data: {e}. Please contact the researchers before closing this page.")
+            st.stop()
+
         st.session_state.data_saved = True
         st.session_state.phase = 15
         st.rerun()
 
 # ============================================================================
-# PHASE 15 — THANK YOU & PROLIFIC REDIRECT  (Fine studio)
+# PHASE 15 — THANK YOU & PROLIFIC REDIRECT
 # ============================================================================
 if st.session_state.phase >= 15:
     st.markdown("## Thank you for participating.")
-    st.markdown("""Your responses have been successfully recorded.
+    st.markdown("Your responses have been successfully recorded.")
+    st.markdown("Please click the link below to finish the study and retrieve your Prolific completion code.")
 
-Please click the button below to finish the study and retrieve your Prolific completion code.""")
-
-    prolific_id_val = st.session_state.get("prolific_id", "")
-    completion_base_url = "https://www.prolific.co/"
-    completion_url = f"{completion_base_url}?PROLIFIC_PID={prolific_id_val}"
-
-    st.markdown(f"[**→ Return to Prolific to complete your submission**]({completion_url})", unsafe_allow_html=True)
+    pid          = st.session_state.get("prolific_id", "")
+    base_url     = "https://www.prolific.co/"
+    redirect_url = f"{base_url}?PROLIFIC_PID={pid}"
+    st.markdown(
+        f"[**→ Return to Prolific to complete your submission**]({redirect_url})",
+        unsafe_allow_html=True
+    )

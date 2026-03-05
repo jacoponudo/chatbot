@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
@@ -84,6 +85,26 @@ def get_openai():
 # ============================================================================
 def scroll_to_top():
     st.components.v1.html("<script>window.parent.scrollTo(0, 0);</script>", height=0)
+
+# ============================================================================
+# SLIDER HELPER
+# ============================================================================
+def labeled_slider(label, key, default=50):
+    col_left, col_mid, col_right = st.columns([1, 6, 1])
+    with col_left:
+        st.markdown(
+            "<div style='text-align:left; padding-top:28px'>0<br><small>Completely<br>inappropriate</small></div>",
+            unsafe_allow_html=True
+        )
+    with col_mid:
+        val = st.slider(label, 0, 100, default, key=key, label_visibility="collapsed")
+    with col_right:
+        st.markdown(
+            "<div style='text-align:right; padding-top:28px'>100<br><small>Completely<br>appropriate</small></div>",
+            unsafe_allow_html=True
+        )
+    return val
+
 # ============================================================================
 # PROLIFIC ID
 # ============================================================================
@@ -114,8 +135,8 @@ if "session_initialized" not in st.session_state:
 if st.session_state.phase == -1:
     st.markdown("## Thank you for your time.")
     st.markdown(
-        "You have chosen not to participate in this study. "
-        "Your response has been noted and you may now close this window."
+        "Unfortunately, your answer makes it impossible for us to include you in this study. "
+        "Thank you for your time. You may now close this window."
     )
     st.stop()
 
@@ -194,10 +215,12 @@ elif st.session_state.phase == 0.5:
     if quality == "I will try to provide my best answers":
         if st.button("Continue"):
             st.session_state.phase = 1
+            scroll_to_top()
             st.rerun()
     elif quality in ("I will not provide my best answers", "I can't promise either way"):
         if st.button("Continue"):
             st.session_state.phase = -1
+            scroll_to_top()
             st.rerun()
 
 # ============================================================================
@@ -236,6 +259,7 @@ elif st.session_state.phase == 1:
         st.session_state.phase = 2
         scroll_to_top()
         st.rerun()
+
 # ============================================================================
 # PHASE 2 — INITIAL APPROPRIATENESS RATINGS
 # ============================================================================
@@ -260,10 +284,7 @@ Your task in each case is simply to rate, on a scale from 0 (completely inapprop
     opinions = {}
     for i, norm in enumerate(st.session_state.sampled_norms):
         st.markdown(f"**How appropriate or inappropriate is it to {norm['title']}?**")
-        opinions[norm['title']] = st.slider(
-            "0 = Completely inappropriate — 100 = Completely appropriate",
-            0, 100, 50, key=f"slider_{i}"
-        )
+        opinions[norm['title']] = labeled_slider(" ", key=f"slider_{i}", default=50)
 
     if st.button("Continue"):
         st.session_state.initial_opinion = opinions
@@ -283,10 +304,7 @@ We will calculate the mean responses provided by the other participants and comp
     for i, norm in enumerate(st.session_state.sampled_norms):
         st.markdown(f"**{norm['title']}**")
         st.markdown("Other respondents' average appropriateness rating:")
-        opinions_others[norm['title']] = st.slider(
-            "0 = Completely inappropriate — 100 = Completely appropriate",
-            0, 100, 50, key=f"group_slider_{i}"
-        )
+        opinions_others[norm['title']] = labeled_slider(" ", key=f"group_slider_{i}", default=50)
 
     if st.button("Continue"):
         st.session_state.opinions_others = opinions_others
@@ -336,7 +354,6 @@ elif st.session_state.phase == 5:
             "timestamp": datetime.now().isoformat(),
         })
         st.session_state.greeting_sent = True
-        scroll_to_top()
         st.rerun()
 
     for m in st.session_state.messages:
@@ -352,7 +369,6 @@ elif st.session_state.phase == 5:
             "content": user_input,
             "timestamp": datetime.now().isoformat(),
         }
-        scroll_to_top()
         st.rerun()
 
     if st.session_state.pending_user_message:
@@ -423,10 +439,7 @@ elif st.session_state.phase == 7:
         title = norm["title"]
         initial_val = st.session_state.initial_opinion.get(title, 50)
         st.markdown(f"**How appropriate or inappropriate is it to {title}?**")
-        final_opinions[title] = st.slider(
-            "0 = Completely inappropriate — 100 = Completely appropriate",
-            0, 100, initial_val, key=f"final_slider_{i}"
-        )
+        final_opinions[title] = labeled_slider(" ", key=f"final_slider_{i}", default=initial_val)
 
     if st.button("Continue"):
         st.session_state.final_opinion = final_opinions
@@ -446,10 +459,7 @@ We will calculate the mean responses provided by the other participants the seco
     for i, norm in enumerate(st.session_state.sampled_norms):
         st.markdown(f"**{norm['title']}**")
         st.markdown("Other respondents' average appropriateness rating:")
-        opinions_others_final[norm['title']] = st.slider(
-            "0 = Completely inappropriate — 100 = Completely appropriate",
-            0, 100, 50, key=f"group_final_slider_{i}"
-        )
+        opinions_others_final[norm['title']] = labeled_slider(" ", key=f"group_final_slider_{i}", default=50)
 
     if st.button("Continue"):
         st.session_state.opinions_others_final = opinions_others_final
@@ -485,7 +495,6 @@ elif st.session_state.phase == 9:
                 if st.button(label, key=f"tight_{i}_{val}", use_container_width=True,
                              type="primary" if selected == val else "secondary"):
                     st.session_state[f"tight_{i}"] = val
-                    scroll_to_top()
                     st.rerun()
         st.markdown("")
 
@@ -549,9 +558,9 @@ elif st.session_state.phase == 10:
             st.markdown("")
 
     st.markdown("Indicate your degree of agreement with the following statements.")
-    _render_7pt(involvement_items, "Involvement — The messages I read during the conversation with the AI:")
-    _render_7pt(threat_items,      "Perceived Threat — The messages I read during the conversation with the AI:")
-    _render_7pt(source_items,      "Evaluation of the Source — To what extent the source of these messages is:")
+    _render_7pt(involvement_items, "The messages I read during the conversation with the AI:")
+    _render_7pt(threat_items,      "The messages I read during the conversation with the AI:")
+    _render_7pt(source_items,      "To what extent the source of these messages is:")
     st.markdown("*Scale: 1 = Totally disagree — 7 = Totally agree*")
 
     if st.button("Continue"):
@@ -564,6 +573,7 @@ elif st.session_state.phase == 10:
         st.session_state.threat_responses      = {l: st.session_state[k] for l, k in threat_items}
         st.session_state.source_responses      = {l: st.session_state[k] for l, k in source_items}
         st.session_state.phase = 11
+        scroll_to_top()
         st.rerun()
 
 # ============================================================================
@@ -592,11 +602,16 @@ elif st.session_state.phase == 12:
 
     age = st.selectbox(
         "How old are you, in years?",
-        ["Select..."] + list(range(18, 101)), key="demo_age"
+        list(range(18, 101)),
+        index=None,
+        placeholder="Select your age...",
+        key="demo_age"
     )
     uk_location = st.selectbox(
         "Where do you live (in the UK)?",
-        ["Select...", "England", "Wales", "Scotland", "Northern Ireland"],
+        ["England", "Wales", "Scotland", "Northern Ireland"],
+        index=None,
+        placeholder="Select your location...",
         key="demo_location"
     )
     st.markdown("**What is your gender?**")
@@ -607,13 +622,16 @@ elif st.session_state.phase == 12:
                        horizontal=True, key="demo_student", label_visibility="collapsed")
     education = st.selectbox(
         "What is the highest level of education you have completed, or the highest degree you have received?",
-        ["Select...",
-         "Less than high school degree (less than 12 years in school)",
-         "High school graduate (12 or more years in school)",
-         "Some college but no degree",
-         "Bachelor's/Associate degree",
-         "Master's degree",
-         "Doctoral degree"],
+        [
+            "Less than high school degree (less than 12 years in school)",
+            "High school graduate (12 or more years in school)",
+            "Some college but no degree",
+            "Bachelor's/Associate degree",
+            "Master's degree",
+            "Doctoral degree",
+        ],
+        index=None,
+        placeholder="Select your education level...",
         key="demo_education"
     )
 
@@ -636,9 +654,9 @@ elif st.session_state.phase == 12:
 
     if st.button("Continue"):
         errors = []
-        if age         == "Select...": errors.append("Please select your age.")
-        if uk_location == "Select...": errors.append("Please select where you live in the UK.")
-        if education   == "Select...": errors.append("Please select your education level.")
+        if age         is None: errors.append("Please select your age.")
+        if uk_location is None: errors.append("Please select where you live in the UK.")
+        if education   is None: errors.append("Please select your education level.")
         if errors:
             for e in errors: st.warning(e)
             st.stop()
@@ -670,6 +688,7 @@ We hope that our research can contribute to a better understanding of how to mak
 
     if st.button("Continue"):
         st.session_state.phase = 14
+        scroll_to_top()
         st.rerun()
 
 # ============================================================================
@@ -688,65 +707,38 @@ elif st.session_state.phase == 14 and not st.session_state.data_saved:
         )
 
         row = [
-            # ── Identity ──────────────────────────────────────────────────
-            st.session_state.prolific_id,                                               # col 1
-            st.session_state.prompt_key,                                                # col 2
-            st.session_state.norm_key,                                                  # col 3
-
-            # ── Pagina 3: Initial appropriateness ─────────────────────────
-            json.dumps(st.session_state.get("initial_opinion", {}),       ensure_ascii=False),  # col 4
-
-            # ── Pagina 4: Initial expected others ─────────────────────────
-            json.dumps(st.session_state.get("opinions_others", {}),       ensure_ascii=False),  # col 5
-
-            # ── Pagina 6: Conversation ────────────────────────────────────
-            json.dumps(st.session_state.get("messages", []),              ensure_ascii=False),  # col 6
-
-            # ── Pagina 7: Attention check ─────────────────────────────────
-            str(st.session_state.get("att_check_response_saved", "")),                 # col 7
-
-            # ── Pagina 8: Final appropriateness ───────────────────────────
-            json.dumps(st.session_state.get("final_opinion", {}),         ensure_ascii=False),  # col 8
-
-            # ── Pagina 9: Final expected others ───────────────────────────
-            json.dumps(st.session_state.get("opinions_others_final", {}), ensure_ascii=False),  # col 9
-
-            # ── Pagina 10: Tightness ──────────────────────────────────────
-            json.dumps(st.session_state.get("tightness_responses", {}),   ensure_ascii=False),  # col 10
-            str(st.session_state.get("tightness_open", "")),                           # col 11
-
-            # ── Pagina 11: Conversation perception ───────────────────────
-            json.dumps(st.session_state.get("involvement_responses", {}), ensure_ascii=False),  # col 12
-            json.dumps(st.session_state.get("threat_responses", {}),      ensure_ascii=False),  # col 13
-            json.dumps(st.session_state.get("source_responses", {}),      ensure_ascii=False),  # col 14
-
-            # ── Pagina 12: Purpose of study ───────────────────────────────
-            str(st.session_state.get("purpose_text_saved", "")),                       # col 15
-
-            # ── Pagina 13: Demographics ───────────────────────────────────
-            str(demographics.get("age",           "")),                                # col 16
-            str(demographics.get("uk_location",   "")),                                # col 17
-            str(demographics.get("gender",        "")),                                # col 18
-            str(demographics.get("student",       "")),                                # col 19
-            str(demographics.get("education",     "")),                                # col 20
-            str(demographics.get("politics",      "")),                                # col 21
-            str(demographics.get("social_ladder", "")),                                # col 22
-
-            # ── Pagina 2: Background question ─────────────────────────────
-            str(st.session_state.get("engagement_text_saved", "")),                    # col 23
-            str(st.session_state.get("engagement_word_count", 0)),                     # col 24
-
-            # ── Pagina 15: Final comments ─────────────────────────────────
-            str(st.session_state.get("final_comments", "")),                           # col 25
-
-            # ── Timing & conversation stats ───────────────────────────────
-            str(st.session_state.get("parallel_engagement_time",    "")),              # col 26
-            str(st.session_state.get("sequential_engagement_time",  "")),              # col 27
-            str(st.session_state.get("interaction_engagement_time", "")),              # col 28
-            str(sum(1 for m in st.session_state.messages if m["role"] == "user")),     # col 29
-            str(user_word_count),                                                       # col 30
-            str(round(total_duration, 2)),                                              # col 31
-            datetime.now().isoformat(),                                                 # col 32
+            st.session_state.prolific_id,
+            st.session_state.prompt_key,
+            st.session_state.norm_key,
+            json.dumps(st.session_state.get("initial_opinion", {}),       ensure_ascii=False),
+            json.dumps(st.session_state.get("opinions_others", {}),       ensure_ascii=False),
+            json.dumps(st.session_state.get("messages", []),              ensure_ascii=False),
+            str(st.session_state.get("att_check_response_saved", "")),
+            json.dumps(st.session_state.get("final_opinion", {}),         ensure_ascii=False),
+            json.dumps(st.session_state.get("opinions_others_final", {}), ensure_ascii=False),
+            json.dumps(st.session_state.get("tightness_responses", {}),   ensure_ascii=False),
+            str(st.session_state.get("tightness_open", "")),
+            json.dumps(st.session_state.get("involvement_responses", {}), ensure_ascii=False),
+            json.dumps(st.session_state.get("threat_responses", {}),      ensure_ascii=False),
+            json.dumps(st.session_state.get("source_responses", {}),      ensure_ascii=False),
+            str(st.session_state.get("purpose_text_saved", "")),
+            str(demographics.get("age",           "")),
+            str(demographics.get("uk_location",   "")),
+            str(demographics.get("gender",        "")),
+            str(demographics.get("student",       "")),
+            str(demographics.get("education",     "")),
+            str(demographics.get("politics",      "")),
+            str(demographics.get("social_ladder", "")),
+            str(st.session_state.get("engagement_text_saved", "")),
+            str(st.session_state.get("engagement_word_count", 0)),
+            str(st.session_state.get("final_comments", "")),
+            str(st.session_state.get("parallel_engagement_time",    "")),
+            str(st.session_state.get("sequential_engagement_time",  "")),
+            str(st.session_state.get("interaction_engagement_time", "")),
+            str(sum(1 for m in st.session_state.messages if m["role"] == "user")),
+            str(user_word_count),
+            str(round(total_duration, 2)),
+            datetime.now().isoformat(),
         ]
 
         try:
@@ -775,3 +767,4 @@ if st.session_state.phase >= 15:
         f"[**→ Return to Prolific to complete your submission**]({redirect_url})",
         unsafe_allow_html=True
     )
+```

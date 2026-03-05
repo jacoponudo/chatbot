@@ -33,7 +33,7 @@ PROMPTS = load_json("prompts.json")
 NORMS   = load_json("norms.json")
 
 # ============================================================================
-# GOOGLE SHEETS — lazy (called only when needed, not at app start)
+# GOOGLE SHEETS — lazy
 # ============================================================================
 def get_sheet():
     if "gsheet" not in st.session_state:
@@ -80,7 +80,7 @@ def get_openai():
     return st.session_state.openai_client
 
 # ============================================================================
-# PROLIFIC ID  (read from URL only — no sheet call yet)
+# PROLIFIC ID
 # ============================================================================
 prolific_id = st.query_params.get("PROLIFIC_PID", "")
 if not prolific_id:
@@ -88,23 +88,23 @@ if not prolific_id:
     st.stop()
 
 # ============================================================================
-# SESSION STATE DEFAULTS  (run once)
+# SESSION STATE DEFAULTS
 # ============================================================================
 if "session_initialized" not in st.session_state:
     st.session_state.update({
-        "session_initialized":        True,
-        "prolific_id":                prolific_id,
-        "phase":                      0,
-        "messages":                   [],
-        "greeting_sent":              False,
-        "data_saved":                 False,
-        "pending_user_message":       None,
-        "page_load_time":             time.time(),
+        "session_initialized":          True,
+        "prolific_id":                  prolific_id,
+        "phase":                        0,
+        "messages":                     [],
+        "greeting_sent":                False,
+        "data_saved":                   False,
+        "pending_user_message":         None,
+        "page_load_time":               time.time(),
         "engagement_first_interaction": None,
     })
 
 # ============================================================================
-# PHASE 0 — CONSENT FORM
+# PHASE -1 — EARLY TERMINATION
 # ============================================================================
 if st.session_state.phase == -1:
     st.markdown("## Thank you for your time.")
@@ -114,6 +114,9 @@ if st.session_state.phase == -1:
     )
     st.stop()
 
+# ============================================================================
+# PHASE 0 — CONSENT FORM
+# ============================================================================
 elif st.session_state.phase == 0:
     st.markdown("## Thank you for joining our study!")
     st.markdown("""
@@ -147,22 +150,21 @@ By clicking "I agree" below you are indicating that you have read this informati
         key="consent_radio"
     )
 
-    if consent is not None:
-        if consent == "I agree":
-            if st.button("Continue"):
-                try:
-                    if check_prolific_id_exists(prolific_id):
-                        st.error("This Prolific ID has already completed the study.")
-                        st.stop()
-                except Exception as e:
-                    st.error(f"Could not verify Prolific ID. Please try again or contact us. Error: {e}")
+    if consent == "I agree":
+        if st.button("Continue"):
+            try:
+                if check_prolific_id_exists(prolific_id):
+                    st.error("This Prolific ID has already completed the study.")
                     st.stop()
-                st.session_state.phase = 0.5
-                st.rerun()
-        else:
-            if st.button("Continue"):
-                st.session_state.phase = -1
-                st.rerun()
+            except Exception as e:
+                st.error(f"Could not verify Prolific ID. Please try again or contact us. Error: {e}")
+                st.stop()
+            st.session_state.phase = 0.5
+            st.rerun()
+    elif consent == "I do not agree":
+        if st.button("Continue"):
+            st.session_state.phase = -1
+            st.rerun()
 
 # ============================================================================
 # PHASE 0.5 — DATA QUALITY CHECK
@@ -182,15 +184,14 @@ elif st.session_state.phase == 0.5:
         key="quality_radio"
     )
 
-    if quality is not None:
-        if quality == "I will try to provide my best answers":
-            if st.button("Continue"):
-                st.session_state.phase = 1
-                st.rerun()
-        else:
-            if st.button("Continue"):
-                st.session_state.phase = -1
-                st.rerun()
+    if quality == "I will try to provide my best answers":
+        if st.button("Continue"):
+            st.session_state.phase = 1
+            st.rerun()
+    elif quality in ("I will not provide my best answers", "I can't promise either way"):
+        if st.button("Continue"):
+            st.session_state.phase = -1
+            st.rerun()
 
 # ============================================================================
 # PHASE 1 — BACKGROUND QUESTION
@@ -227,7 +228,6 @@ elif st.session_state.phase == 1:
         )
         st.session_state.phase = 2
         st.rerun()
-
 # ============================================================================
 # PHASE 2 — INITIAL APPROPRIATENESS RATINGS
 # ============================================================================

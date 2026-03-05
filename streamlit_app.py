@@ -558,9 +558,9 @@ elif st.session_state.phase == 10:
             st.markdown("")
 
     st.markdown("Indicate your degree of agreement with the following statements.")
-    _render_7pt(involvement_items, "The messages I read during the conversation with the AI:")
-    _render_7pt(threat_items,      "The messages I read during the conversation with the AI:")
-    _render_7pt(source_items,      "To what extent the source of these messages is:")
+    _render_7pt(involvement_items, "Involvement — The messages I read during the conversation with the AI:")
+    _render_7pt(threat_items,      "Perceived Threat — The messages I read during the conversation with the AI:")
+    _render_7pt(source_items,      "Evaluation of the Source — To what extent the source of these messages is:")
     st.markdown("*Scale: 1 = Totally disagree — 7 = Totally agree*")
 
     if st.button("Continue"):

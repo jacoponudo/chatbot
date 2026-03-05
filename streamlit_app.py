@@ -767,4 +767,3 @@ if st.session_state.phase >= 15:
         f"[**→ Return to Prolific to complete your submission**]({redirect_url})",
         unsafe_allow_html=True
     )
-```

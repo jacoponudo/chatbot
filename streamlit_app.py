@@ -647,7 +647,7 @@ elif st.session_state.phase == 12:
 
     st.markdown("<br><br>", unsafe_allow_html=True)
 
-    st.markdown("""**Think of this ladder as representing where people stand in the UK. At the top of the ladder are the people who are the best off – those who have the most money, the most education, and the most respected jobs. At the bottom are the people who are the worst off – those who have the least money, least education, the least respected jobs, or no job. Where would you place yourself on this ladder?**""")
+    st.markdown("""**Think of a ladder as representing where people stand in the UK. At the top of the ladder are the people who are the best off – those who have the most money, the most education, and the most respected jobs. At the bottom are the people who are the worst off – those who have the least money, least education, the least respected jobs, or no job. Where would you place yourself on this ladder?**""")
     col_l2, col_m2, col_r2 = st.columns([2, 5, 2])
     with col_l2:
         st.markdown("<div style='text-align:right;padding-top:28px'>Bottom (1)</div>",

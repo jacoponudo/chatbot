@@ -55,6 +55,9 @@ def check_prolific_id_exists(prolific_id):
     values = get_sheet().col_values(1)
     return prolific_id.lower() in [v.lower() for v in values[1:]]
 
+def scroll_to_top():
+    st.components.v1.html("<script>window.parent.scrollTo(0, 0);</script>", height=0)
+
 def get_least_used_combination():
     sheet  = get_sheet()
     data   = sheet.get_all_values()
@@ -109,8 +112,8 @@ if "session_initialized" not in st.session_state:
 if st.session_state.phase == -1:
     st.markdown("## Thank you for your time.")
     st.markdown(
-        "You have chosen not to participate in this study. "
-        "Your response has been noted and you may now close this window."
+        "Unfortunately, your answer makes it impossible for us to include you in this study. "
+        "Thank you for your time. You may now close this window."
     )
     st.stop()
 
@@ -160,10 +163,12 @@ By clicking "I agree" below you are indicating that you have read this informati
                 st.error(f"Could not verify Prolific ID. Please try again or contact us. Error: {e}")
                 st.stop()
             st.session_state.phase = 0.5
+            scroll_to_top()
             st.rerun()
     elif consent == "I do not agree":
         if st.button("Continue"):
             st.session_state.phase = -1
+            scroll_to_top()
             st.rerun()
 
 # ============================================================================
@@ -187,11 +192,13 @@ elif st.session_state.phase == 0.5:
     if quality == "I will try to provide my best answers":
         if st.button("Continue"):
             st.session_state.phase = 1
-            st.rerun()
+            scroll_to_top()
+            st.rerun()()
     elif quality in ("I will not provide my best answers", "I can't promise either way"):
         if st.button("Continue"):
             st.session_state.phase = -1
-            st.rerun()
+            scroll_to_top()
+            st.rerun()()
 
 # ============================================================================
 # PHASE 1 — BACKGROUND QUESTION
@@ -227,7 +234,8 @@ elif st.session_state.phase == 1:
             if st.session_state.engagement_first_interaction else None
         )
         st.session_state.phase = 2
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 # ============================================================================
 # PHASE 2 — INITIAL APPROPRIATENESS RATINGS
 # ============================================================================
@@ -260,7 +268,8 @@ Your task in each case is simply to rate, on a scale from 0 (completely inapprop
     if st.button("Continue"):
         st.session_state.initial_opinion = opinions
         st.session_state.phase = 3
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 3 — EXPECTED OTHERS' RATINGS (initial)
@@ -282,7 +291,8 @@ We will calculate the mean responses provided by the other participants and comp
     if st.button("Continue"):
         st.session_state.opinions_others = opinions_others
         st.session_state.phase = 4
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 4 — INSTRUCTIONS FOR CONVERSATION
@@ -296,7 +306,8 @@ When the conversation is over, you should see a message at the bottom: **Scroll 
 
     if st.button("Start Conversation"):
         st.session_state.phase = 5
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 5 — CONVERSATION WITH LLM
@@ -325,7 +336,8 @@ elif st.session_state.phase == 5:
             "timestamp": datetime.now().isoformat(),
         })
         st.session_state.greeting_sent = True
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
@@ -340,7 +352,8 @@ elif st.session_state.phase == 5:
             "content": user_input,
             "timestamp": datetime.now().isoformat(),
         }
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
     if st.session_state.pending_user_message:
         user_msg = st.session_state.pending_user_message
@@ -371,7 +384,8 @@ elif st.session_state.phase == 5:
                 "content": closing,
                 "timestamp": datetime.now().isoformat(),
             })
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
     user_msg_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
     if user_msg_count >= 2:
@@ -379,7 +393,8 @@ elif st.session_state.phase == 5:
         st.markdown("*Scroll down and proceed to the next section.*")
         if st.button("End Discussion & Continue"):
             st.session_state.phase = 6
-            st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 6 — ATTENTION CHECK
@@ -395,7 +410,8 @@ elif st.session_state.phase == 6:
             st.stop()
         st.session_state.att_check_response_saved = st.session_state.att_check_response
         st.session_state.phase = 7
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 7 — FINAL APPROPRIATENESS RATINGS
@@ -416,7 +432,8 @@ elif st.session_state.phase == 7:
     if st.button("Continue"):
         st.session_state.final_opinion = final_opinions
         st.session_state.phase = 8
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 8 — FINAL EXPECTED OTHERS' RATINGS
@@ -438,7 +455,8 @@ We will calculate the mean responses provided by the other participants the seco
     if st.button("Continue"):
         st.session_state.opinions_others_final = opinions_others_final
         st.session_state.phase = 9
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 9 — TIGHTNESS SCALE
@@ -468,7 +486,8 @@ elif st.session_state.phase == 9:
                 if st.button(label, key=f"tight_{i}_{val}", use_container_width=True,
                              type="primary" if selected == val else "secondary"):
                     st.session_state[f"tight_{i}"] = val
-                    st.rerun()
+                    scroll_to_top()
+                    st.rerun()()
         st.markdown("")
 
     st.markdown("---")
@@ -487,7 +506,8 @@ elif st.session_state.phase == 9:
             for i, item in enumerate(tightness_items)
         }
         st.session_state.phase = 10
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 10 — CONVERSATION PERCEPTION
@@ -526,7 +546,8 @@ elif st.session_state.phase == 10:
                     if st.button(str(j), key=f"{key}_{j}", use_container_width=True,
                                  type="primary" if selected == j else "secondary"):
                         st.session_state[key] = j
-                        st.rerun()
+                        scroll_to_top()
+                        st.rerun()()
             st.markdown("")
 
     st.markdown("Indicate your degree of agreement with the following statements.")
@@ -545,7 +566,8 @@ elif st.session_state.phase == 10:
         st.session_state.threat_responses      = {l: st.session_state[k] for l, k in threat_items}
         st.session_state.source_responses      = {l: st.session_state[k] for l, k in source_items}
         st.session_state.phase = 11
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 11 — PURPOSE OF STUDY
@@ -628,7 +650,8 @@ elif st.session_state.phase == 12:
             "politics": politics, "social_ladder": ladder,
         }
         st.session_state.phase = 13
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 13 — DEBRIEFING
@@ -649,7 +672,8 @@ We hope that our research can contribute to a better understanding of how to mak
 
     if st.button("Continue"):
         st.session_state.phase = 14
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 14 — FINAL COMMENTS  +  SINGLE SAVE TO GOOGLE SHEETS
@@ -736,7 +760,8 @@ elif st.session_state.phase == 14 and not st.session_state.data_saved:
 
         st.session_state.data_saved = True
         st.session_state.phase = 15
-        st.rerun()
+        scroll_to_top()
+        st.rerun()()
 
 # ============================================================================
 # PHASE 15 — THANK YOU & PROLIFIC REDIRECT

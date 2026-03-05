@@ -634,8 +634,7 @@ elif st.session_state.phase == 12:
         placeholder="Select your education level...",
         key="demo_education"
     )
-
-    st.markdown("**Here is a 7-point scale...**")
+    st.markdown("**Here is a 7-point scale on which the political views that people might hold are arranged from extremely liberal (left) to extremely conservative (right). Where would you place yourself on this scale?**")
     col_l, col_m, col_r = st.columns([2, 5, 2])
     with col_l:
         st.markdown("<div style='text-align:right;padding-top:28px'>Extremely liberal (left)</div>",
@@ -646,7 +645,9 @@ elif st.session_state.phase == 12:
         st.markdown("<div style='padding-top:28px'>Extremely conservative (right)</div>",
                     unsafe_allow_html=True)
 
-    st.markdown("""**Think of this ladder...**""")
+    st.markdown("<br><br>", unsafe_allow_html=True)
+
+    st.markdown("""**Think of this ladder as representing where people stand in the UK. At the top of the ladder are the people who are the best off – those who have the most money, the most education, and the most respected jobs. At the bottom are the people who are the worst off – those who have the least money, least education, the least respected jobs, or no job. Where would you place yourself on this ladder?**""")
     col_l2, col_m2, col_r2 = st.columns([2, 5, 2])
     with col_l2:
         st.markdown("<div style='text-align:right;padding-top:28px'>Bottom (1)</div>",

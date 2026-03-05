@@ -106,7 +106,15 @@ if "session_initialized" not in st.session_state:
 # ============================================================================
 # PHASE 0 — CONSENT FORM
 # ============================================================================
-if st.session_state.phase == 0:
+if st.session_state.phase == -1:
+    st.markdown("## Thank you for your time.")
+    st.markdown(
+        "You have chosen not to participate in this study. "
+        "Your response has been noted and you may now close this window."
+    )
+    st.stop()
+
+elif st.session_state.phase == 0:
     st.markdown("## Thank you for joining our study!")
     st.markdown("""
 **Before proceeding, please read carefully the information reported below.**
@@ -152,8 +160,9 @@ By clicking "I agree" below you are indicating that you have read this informati
                 st.session_state.phase = 0.5
                 st.rerun()
         else:
-            st.warning("Thank you for your time. You cannot proceed without consenting to participate. You may close this window.")
-            st.stop()
+            if st.button("Continue"):
+                st.session_state.phase = -1
+                st.rerun()
 
 # ============================================================================
 # PHASE 0.5 — DATA QUALITY CHECK
@@ -179,8 +188,9 @@ elif st.session_state.phase == 0.5:
                 st.session_state.phase = 1
                 st.rerun()
         else:
-            st.warning("Thank you for your time. We require committed participants to ensure data quality. You may close this window.")
-            st.stop()
+            if st.button("Continue"):
+                st.session_state.phase = -1
+                st.rerun()
 
 # ============================================================================
 # PHASE 1 — BACKGROUND QUESTION

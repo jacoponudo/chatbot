@@ -103,6 +103,7 @@ def labeled_slider(label, key, default=50):
             "<div style='text-align:right; padding-top:28px'>100<br><small>Completely<br>appropriate</small></div>",
             unsafe_allow_html=True
         )
+    st.markdown("<br><br>", unsafe_allow_html=True)
     return val
 
 # ============================================================================
@@ -417,8 +418,7 @@ elif st.session_state.phase == 5:
 elif st.session_state.phase == 6:
     st.markdown("**Which of the following best describes the main topic discussed with the AI?**")
     options = [n["title"] for n in st.session_state.sampled_norms] + ["None of the above / I don't remember"]
-    st.radio("Select one:", options, key="att_check_response", label_visibility="collapsed")
-
+    st.radio("Select one:", options, index=None, key="att_check_response", label_visibility="collapsed")
     if st.button("Continue"):
         if not st.session_state.get("att_check_response"):
             st.warning("Please select an answer before continuing.")

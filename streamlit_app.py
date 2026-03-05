@@ -558,10 +558,10 @@ elif st.session_state.phase == 10:
             st.markdown("")
 
     st.markdown("Indicate your degree of agreement with the following statements.")
+    st.markdown("*Scale: 1 = Totally disagree — 7 = Totally agree*")
     _render_7pt(involvement_items, "Involvement — The messages I read during the conversation with the AI:")
     _render_7pt(threat_items,      "Perceived Threat — The messages I read during the conversation with the AI:")
     _render_7pt(source_items,      "Evaluation of the Source — To what extent the source of these messages is:")
-    st.markdown("*Scale: 1 = Totally disagree — 7 = Totally agree*")
 
     if st.button("Continue"):
         all_keys = [k for _, k in involvement_items + threat_items + source_items]
@@ -635,7 +635,7 @@ elif st.session_state.phase == 12:
         key="demo_education"
     )
 
-    st.markdown("**Here is a 7-point scale on which the political views that people might hold are arranged from extremely liberal (left) to extremely conservative (right). Where would you place yourself on this scale?**")
+    st.markdown("**Here is a 7-point scale...**")
     col_l, col_m, col_r = st.columns([2, 5, 2])
     with col_l:
         st.markdown("<div style='text-align:right;padding-top:28px'>Extremely liberal (left)</div>",
@@ -646,12 +646,20 @@ elif st.session_state.phase == 12:
         st.markdown("<div style='padding-top:28px'>Extremely conservative (right)</div>",
                     unsafe_allow_html=True)
 
-    st.markdown("""**Think of this ladder as representing where people stand in the UK. At the top of the ladder are the people who are the best off – those who have the most money, the most education, and the most respected jobs. At the bottom are the people who are the worst off – those who have the least money, least education, the least respected jobs, or no job. Where would you place yourself on this ladder?**""")
-    ladder = st.select_slider(
-        "Social ladder position (1 = bottom, 10 = top):",
-        options=list(range(1, 11)), value=5, key="demo_ladder"
-    )
-
+    st.markdown("""**Think of this ladder...**""")
+    col_l2, col_m2, col_r2 = st.columns([2, 5, 2])
+    with col_l2:
+        st.markdown("<div style='text-align:right;padding-top:28px'>Bottom (1)</div>",
+                    unsafe_allow_html=True)
+    with col_m2:
+        ladder = st.select_slider(
+            "Social ladder position (1 = bottom, 10 = top):",
+            options=list(range(1, 11)), value=5, key="demo_ladder",
+            label_visibility="collapsed"
+        )
+    with col_r2:
+        st.markdown("<div style='padding-top:28px'>Top (10)</div>",
+                    unsafe_allow_html=True)
     if st.button("Continue"):
         errors = []
         if age         is None: errors.append("Please select your age.")

@@ -677,7 +677,6 @@ elif st.session_state.phase == 9:
 # ============================================================================
 # PHASE 10 — CONVERSATION PERCEPTION
 # ============================================================================
-scroll_to_top()
 elif st.session_state.phase == 10:
     involvement_items = [
         ("They got me involved.",       "involvement_0"),

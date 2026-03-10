@@ -10,6 +10,7 @@ from collections import defaultdict
 
 import vertexai
 from vertexai.generative_models import GenerativeModel, ChatSession
+import threading
 
 # ============================================================================
 # PAGE CONFIG
@@ -92,6 +93,17 @@ def get_gemini_model() -> GenerativeModel:
         st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
     return st.session_state.gemini_model
 
+
+def preload_gemini_in_background():
+    """Avvia l'inizializzazione di Vertex AI in un thread separato."""
+    def _init():
+        try:
+            get_gemini_model()
+        except Exception:
+            pass  # Gli errori verranno gestiti quando il modello viene usato davvero
+    if not st.session_state.get("gemini_preload_started"):
+        st.session_state.gemini_preload_started = True
+        threading.Thread(target=_init, daemon=True).start()
 
 def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
     """
@@ -186,6 +198,8 @@ if st.session_state.phase == -1:
 # PHASE 0 — CONSENT FORM
 # ============================================================================
 elif st.session_state.phase == 0:
+    # Avvia la connessione a Vertex AI in background mentre l'utente legge il consenso
+    preload_gemini_in_background()
     st.markdown("## Thank you for joining our study!")
     st.markdown("""
 **Before proceeding, please read carefully the information reported below.**

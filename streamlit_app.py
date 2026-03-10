@@ -166,56 +166,11 @@ def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
 # SCROLL TO TOP
 # ============================================================================
 def scroll_to_top():
-    st.components.v1.html("""
-        <script>
-            (function() {
-                function scrollAll() {
-                    // Selettori specifici di Streamlit
-                    const selectors = [
-                        '.main',
-                        '.block-container',
-                        '[data-testid="stAppViewContainer"]',
-                        '[data-testid="stApp"]',
-                        'section.main',
-                        '.stApp',
-                    ];
-
-                    // Scrolla tutti i selettori nel documento parent
-                    selectors.forEach(sel => {
-                        try {
-                            const el = window.parent.document.querySelector(sel);
-                            if (el) {
-                                el.scrollTop = 0;
-                                el.scrollTo({ top: 0, behavior: 'instant' });
-                            }
-                        } catch(e) {}
-                    });
-
-                    // Scrolla tutti i livelli window
-                    [window, window.parent, window.top].forEach(w => {
-                        try {
-                            w.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-                        } catch(e) {}
-                    });
-
-                    // Scrolla document root e body a tutti i livelli
-                    [window.document, window.parent.document, window.top.document].forEach(doc => {
-                        try {
-                            doc.documentElement.scrollTop = 0;
-                            doc.body.scrollTop = 0;
-                        } catch(e) {}
-                    });
-                }
-
-                // Esegui subito e dopo brevi ritardi per sicurezza
-                scrollAll();
-                setTimeout(scrollAll, 50);
-                setTimeout(scrollAll, 150);
-                setTimeout(scrollAll, 300);
-            })();
-        </script>
-    """, height=0)
-
+    st.components.v1.html("<script>window.parent.scrollTo(0, 0);</script>", height=0)
+    st.components.v1.html("<script>window.parent.scrollTo(0, 0);</script>", height=0)
+    st.components.v1.html("<script>window.parent.scrollTo(0, 0);</script>", height=0)
+    st.components.v1.html("<script>window.parent.scrollTo(0, 0);</script>", height=0)
+    st.components.v1.html("<script>window.parent.scrollTo(0, 0);</script>", height=0)
 # ============================================================================
 # SLIDER HELPER
 # ============================================================================

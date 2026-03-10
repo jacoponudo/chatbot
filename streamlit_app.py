@@ -34,7 +34,6 @@ def load_json(path):
 
 PROMPTS = load_json("prompts.json")
 NORMS   = load_json("norms.json")
-pos=99
 
 # ============================================================================
 # GOOGLE SHEETS — lazy
@@ -81,7 +80,6 @@ def save_to_google_sheets(row):
 def get_gemini_model() -> GenerativeModel:
     """Inizializza Vertex AI usando le credenziali nei Streamlit Secrets."""
     if "gemini_model" not in st.session_state:
-        # Legge le credenziali dal blocco [gcp_vertex_account] in secrets.toml
         vertex_creds = Credentials.from_service_account_info(
             st.secrets["gcp_vertex_account"],
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
@@ -131,7 +129,7 @@ def precompute_greeting_in_background():
             st.session_state.precomputed_greeting      = response.text
             st.session_state.precomputed_system_prompt = system_prompt
         except Exception:
-            pass  # Se fallisce, la fase 5 lo rigenera normalmente
+            pass
 
     if not st.session_state.get("greeting_precompute_started"):
         st.session_state.greeting_precompute_started = True
@@ -148,23 +146,17 @@ def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
     model = get_gemini_model()
     chat  = model.start_chat()
 
-    # Ricostruisce la storia: ignora l'ultimo messaggio utente (verrà inviato adesso)
     history = [m for m in st.session_state.messages if m["role"] != "system"]
     for i, msg in enumerate(history):
         if msg["role"] == "user":
-            # Invia il messaggio utente e aspetta la risposta dell'assistant successiva
             next_msg = history[i + 1] if i + 1 < len(history) else None
             if next_msg and next_msg["role"] == "assistant":
-                # Simula lo scambio già avvenuto senza fare chiamate API reali
-                # Vertex AI ChatSession mantiene la history internamente
                 pass
-    # Nota: Vertex AI non permette di iniettare storia manualmente come OpenAI.
-    # La chat viene ricreata pulita; la storia visuale resta in st.session_state.messages.
     st.session_state.gemini_chat = chat
     return chat
 
 # ============================================================================
-# SCROLL TO TOP
+# SCROLL TO TOP — only fires once per phase entry
 # ============================================================================
 def scroll_to_top():
     unique = int(time.time() * 1000)
@@ -194,6 +186,14 @@ def scroll_to_top():
         """,
         height=0,
     )
+
+def scroll_to_top_on_phase_entry():
+    """Triggers scroll_to_top only the first time a phase is rendered."""
+    current_phase = st.session_state.phase
+    if st.session_state.get("last_scrolled_phase") != current_phase:
+        scroll_to_top()
+        st.session_state.last_scrolled_phase = current_phase
+
 # ============================================================================
 # SLIDER HELPER
 # ============================================================================
@@ -236,18 +236,20 @@ if "session_initialized" not in st.session_state:
         "pending_user_message":         None,
         "page_load_time":               time.time(),
         "engagement_first_interaction": None,
-        "gemini_chat":                  None,   # ChatSession Gemini
-        "system_prompt_cache":          None,   # system prompt usato nella chat
+        "gemini_chat":                  None,
+        "system_prompt_cache":          None,
+        "last_scrolled_phase":          None,   # tracks which phase was last scrolled
     })
+
+# ============================================================================
+# SCROLL TO TOP ON FIRST ENTRY INTO CURRENT PHASE
+# ============================================================================
+scroll_to_top_on_phase_entry()
 
 # ============================================================================
 # PHASE -1 — EARLY TERMINATION
 # ============================================================================
-
-if st.session_state.phase!=pos:
-    scroll_to_top()
 if st.session_state.phase == -1:
-    pos=st.session_state.phase
     st.markdown("## Thank you for your time.")
     st.markdown(
         "Unfortunately, your answer makes it impossible for us to include you in this study. "
@@ -259,8 +261,6 @@ if st.session_state.phase == -1:
 # PHASE 0 — CONSENT FORM
 # ============================================================================
 elif st.session_state.phase == 0:
-    pos=st.session_state.phase
-    # Avvia la connessione a Vertex AI in background mentre l'utente legge il consenso
     preload_gemini_in_background()
     st.markdown("## Thank you for joining our study!")
     st.markdown("""
@@ -304,19 +304,16 @@ By clicking "I agree" below you are indicating that you have read this informati
                 st.error(f"Could not verify Prolific ID. Please try again or contact us. Error: {e}")
                 st.stop()
             st.session_state.phase = 0.5
-            scroll_to_top()
             st.rerun()
     elif consent == "I do not agree":
         if st.button("Continue"):
             st.session_state.phase = -1
-            scroll_to_top()
             st.rerun()
 
 # ============================================================================
 # PHASE 0.5 — DATA QUALITY CHECK
 # ============================================================================
 elif st.session_state.phase == 0.5:
-    pos=st.session_state.phase
     st.markdown("We care about the quality of our survey data. For us to fully understand your opinions, it is important that you provide careful answers to each question in this survey.")
     st.markdown("**Do you commit to thoughtfully provide your best answers to the questions in this survey?**")
 
@@ -334,19 +331,16 @@ elif st.session_state.phase == 0.5:
     if quality == "I will try to provide my best answers":
         if st.button("Continue"):
             st.session_state.phase = 1
-            scroll_to_top()
             st.rerun()
     elif quality in ("I will not provide my best answers", "I can't promise either way"):
         if st.button("Continue"):
             st.session_state.phase = -1
-            scroll_to_top()
             st.rerun()
 
 # ============================================================================
 # PHASE 1 — BACKGROUND QUESTION
 # ============================================================================
 elif st.session_state.phase == 1:
-    pos=st.session_state.phase
     st.markdown("Please answer the question below in a few sentences. There is no right or wrong answer.")
     st.markdown("**If you could change one thing about the world, what would it be and why? Please elaborate in a few sentences so we can better understand your perspective.**")
 
@@ -377,14 +371,12 @@ elif st.session_state.phase == 1:
             if st.session_state.engagement_first_interaction else None
         )
         st.session_state.phase = 2
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 2 — INITIAL APPROPRIATENESS RATINGS
 # ============================================================================
 elif st.session_state.phase == 2:
-    pos=st.session_state.phase
     if "prompt_key" not in st.session_state:
         prompt_key, norm_key = get_least_used_combination()
         st.session_state.prompt_key = prompt_key
@@ -410,14 +402,12 @@ Your task in each case is simply to rate, on a scale from 0 (completely inapprop
     if st.button("Continue"):
         st.session_state.initial_opinion = opinions
         st.session_state.phase = 3
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 3 — EXPECTED OTHERS' RATINGS (initial)
 # ============================================================================
 elif st.session_state.phase == 3:
-    pos=st.session_state.phase
     st.markdown("""We will now ask you what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors from 0 (completely inappropriate) to 100 (completely appropriate).
 
 We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±3), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
@@ -431,33 +421,28 @@ We will calculate the mean responses provided by the other participants and comp
     if st.button("Continue"):
         st.session_state.opinions_others = opinions_others
         st.session_state.phase = 4
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 4 — INSTRUCTIONS FOR CONVERSATION
 # ============================================================================
 elif st.session_state.phase == 4:
-    pos=st.session_state.phase
     st.markdown("""Now, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The purpose of this dialogue is to see how humans and AI interact. Please be open and honest in your responses. Remember that the AI is neutral and non-judgmental, and your participation is confidential. When the conversation begins, you should see an AI icon with chat bubbles "..." indicating it's generating responses. It can sometimes take up to 30s. If you don't see any icons or if it's taking too long to generate responses, try refreshing the page. If you run into further issues, please let us know.
 
 Please read each AI message thoroughly, and you may have to scroll down to read its full message. You will be asked some questions about your interaction. You will have to write at least 2 messages to the AI, up to a maximum of 10.
 
 When the conversation is over, you should see a message at the bottom: **Scroll down and proceed to the next section.**""")
 
-    # Avvia il precompute del greeting in background mentre l'utente legge le istruzioni
     precompute_greeting_in_background()
 
     if st.button("Start Conversation"):
         st.session_state.phase = 5
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 5 — CONVERSATION WITH GEMINI
 # ============================================================================
 elif st.session_state.phase == 5:
-    pos=st.session_state.phase
     prompt_data   = PROMPTS[st.session_state.prompt_key]
     norm_data     = NORMS[st.session_state.norm_key]
     initial_val   = st.session_state.initial_opinion.get(norm_data["title"], 50)
@@ -469,15 +454,13 @@ elif st.session_state.phase == 5:
     st.session_state.system_prompt_cache = system_prompt
 
     # ------------------------------------------------------------------ #
-    # GREETING — usa il precomputed se disponibile, altrimenti lo genera  #
+    # GREETING                                                             #
     # ------------------------------------------------------------------ #
     if not st.session_state.greeting_sent:
         if st.session_state.get("precomputed_greeting"):
-            # ✅ Greeting già pronto — nessuna attesa
             st.session_state.gemini_chat = st.session_state.precomputed_chat
             greeting_text = st.session_state.precomputed_greeting
         else:
-            # ⏳ Fallback: genera al momento (precompute non ancora finito)
             with st.spinner("Starting conversation..."):
                 model = get_gemini_model()
                 chat  = model.start_chat()
@@ -527,26 +510,22 @@ elif st.session_state.phase == 5:
         st.session_state.pending_user_message = None
 
         if round_count < 10:
-            # Recupera o ricostruisce la ChatSession
             chat = st.session_state.get("gemini_chat")
             if chat is None:
-                # Se la sessione è andata persa (es. reload), ricreiamo la chat
                 model = get_gemini_model()
                 chat  = model.start_chat()
-                # Re-invia il system prompt come contesto
                 chat.send_message(
                     f"{system_prompt}\n\n"
                     "Continue the ongoing discussion. "
                     "Below is the conversation so far (for context only):\n\n"
                     + "\n".join(
                         f"{'User' if m['role']=='user' else 'You'}: {m['content']}"
-                        for m in st.session_state.messages[:-1]  # escludi l'ultimo
+                        for m in st.session_state.messages[:-1]
                     )
                 )
                 st.session_state.gemini_chat = chat
 
             with st.chat_message("assistant"):
-                # Streaming della risposta
                 stream     = chat.send_message(user_msg["content"], stream=True)
                 reply_text = st.write_stream(chunk.text for chunk in stream)
 
@@ -577,14 +556,12 @@ elif st.session_state.phase == 5:
         st.markdown("*Scroll down and proceed to the next section.*")
         if st.button("End Discussion & Continue"):
             st.session_state.phase = 6
-            scroll_to_top()
             st.rerun()
 
 # ============================================================================
 # PHASE 6 — ATTENTION CHECK
 # ============================================================================
 elif st.session_state.phase == 6:
-    pos=st.session_state.phase
     st.markdown("**Which of the following best describes the main topic discussed with the AI?**")
     options = [n["title"] for n in st.session_state.sampled_norms] + ["None of the above / I don't remember"]
     st.radio("Select one:", options, index=None, key="att_check_response", label_visibility="collapsed")
@@ -594,14 +571,12 @@ elif st.session_state.phase == 6:
             st.stop()
         st.session_state.att_check_response_saved = st.session_state.att_check_response
         st.session_state.phase = 7
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 7 — FINAL APPROPRIATENESS RATINGS
 # ============================================================================
 elif st.session_state.phase == 7:
-    pos=st.session_state.phase
     st.markdown("We ask you again to rate, on a scale from 0 (completely inappropriate) to 100 (completely appropriate), the appropriateness of these behaviors.")
 
     final_opinions = {}
@@ -614,14 +589,12 @@ elif st.session_state.phase == 7:
     if st.button("Continue"):
         st.session_state.final_opinion = final_opinions
         st.session_state.phase = 8
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 8 — FINAL EXPECTED OTHERS' RATINGS
 # ============================================================================
 elif st.session_state.phase == 8:
-    pos=st.session_state.phase
     st.markdown("""We will now ask you again what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors from 0 (completely inappropriate) to 100 (completely appropriate).
 
 We will calculate the mean responses provided by the other participants the second time they were asked and compare them with the estimate you provided. If your estimate is correct (±3), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
@@ -635,14 +608,12 @@ We will calculate the mean responses provided by the other participants the seco
     if st.button("Continue"):
         st.session_state.opinions_others_final = opinions_others_final
         st.session_state.phase = 9
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 9 — TIGHTNESS SCALE
 # ============================================================================
 elif st.session_state.phase == 9:
-    pos=st.session_state.phase
     st.markdown("""The following statements refer to the country in which you currently live, as a whole. Indicate whether you agree or disagree with the statements using the following scale. Note that the statements sometimes refer to "social norms," which are generally unwritten standards of behavior.""")
 
     tightness_items = [
@@ -686,14 +657,12 @@ elif st.session_state.phase == 9:
             for i, item in enumerate(tightness_items)
         }
         st.session_state.phase = 10
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 10 — CONVERSATION PERCEPTION
 # ============================================================================
 elif st.session_state.phase == 10:
-    pos=st.session_state.phase
     involvement_items = [
         ("They got me involved.",       "involvement_0"),
         ("They seemed relevant to me.", "involvement_1"),
@@ -745,14 +714,12 @@ elif st.session_state.phase == 10:
         st.session_state.threat_responses      = {l: st.session_state[k] for l, k in threat_items}
         st.session_state.source_responses      = {l: st.session_state[k] for l, k in source_items}
         st.session_state.phase = 11
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 11 — PURPOSE OF STUDY
 # ============================================================================
 elif st.session_state.phase == 11:
-    pos=st.session_state.phase
     st.markdown("**What do you think is the purpose of this study?**")
     st.text_area("Your answer:", height=150, key="purpose_text", label_visibility="collapsed")
 
@@ -763,14 +730,12 @@ elif st.session_state.phase == 11:
             st.stop()
         st.session_state.purpose_text_saved = response
         st.session_state.phase = 12
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 12 — DEMOGRAPHIC QUESTIONS
 # ============================================================================
 elif st.session_state.phase == 12:
-    pos=st.session_state.phase
     st.markdown("Please answer the following questions about yourself.")
     st.markdown("---")
 
@@ -850,14 +815,12 @@ elif st.session_state.phase == 12:
             "politics": politics, "social_ladder": ladder,
         }
         st.session_state.phase = 13
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 13 — DEBRIEFING
 # ============================================================================
 elif st.session_state.phase == 13:
-    pos=st.session_state.phase
     st.markdown("## Debriefing")
     st.markdown("""Our study focuses on a type of artificial intelligence (AI) called a "large language model" or LLM. An LLM is a type of AI that can engage you in a conversation. We set out to measure whether LLMs could persuade people to change their judgments about the appropriateness of everyday social behaviors. This is because we are interested in seeing if it is possible to use LLMs as tools for social persuasion, that is, to influence how people think about what is or is not appropriate behavior.
 
@@ -873,14 +836,12 @@ We hope that our research can contribute to a better understanding of how to mak
 
     if st.button("Continue"):
         st.session_state.phase = 14
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 14 — FINAL COMMENTS  +  SINGLE SAVE TO GOOGLE SHEETS
 # ============================================================================
 elif st.session_state.phase == 14 and not st.session_state.data_saved:
-    pos=st.session_state.phase
     st.markdown("You may optionally leave any comments about the study in the box below.")
     st.text_area("Comments (optional):", height=120, key="final_comments", label_visibility="collapsed")
 
@@ -935,14 +896,12 @@ elif st.session_state.phase == 14 and not st.session_state.data_saved:
 
         st.session_state.data_saved = True
         st.session_state.phase = 15
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 15 — THANK YOU & PROLIFIC REDIRECT
 # ============================================================================
 elif st.session_state.phase >= 15:
-    pos=st.session_state.phase
     st.markdown("## Thank you for participating.")
     st.markdown("Your responses have been successfully recorded.")
     st.markdown("Please click the link below to finish the study and retrieve your Prolific completion code.")

@@ -254,7 +254,6 @@ if st.session_state.phase == -1:
 # PHASE 0 — CONSENT FORM
 # ============================================================================
 elif st.session_state.phase == 0:
-    scroll_to_top()
     # Avvia la connessione a Vertex AI in background mentre l'utente legge il consenso
     preload_gemini_in_background()
     st.markdown("## Thank you for joining our study!")

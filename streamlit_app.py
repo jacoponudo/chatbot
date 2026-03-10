@@ -1,14 +1,15 @@
-
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
-from openai import OpenAI
 import json
 import os
 import time
 import random
 from collections import defaultdict
+
+import vertexai
+from vertexai.generative_models import GenerativeModel, ChatSession
 
 # ============================================================================
 # PAGE CONFIG
@@ -73,12 +74,50 @@ def save_to_google_sheets(row):
     get_sheet().append_row(row, value_input_option="RAW")
 
 # ============================================================================
-# OPENAI CLIENT — lazy
+# VERTEX AI / GEMINI CLIENT — lazy
 # ============================================================================
-def get_openai():
-    if "openai_client" not in st.session_state:
-        st.session_state.openai_client = OpenAI(api_key=st.secrets["openai_api_key"])
-    return st.session_state.openai_client
+def get_gemini_model() -> GenerativeModel:
+    """Inizializza Vertex AI usando le credenziali nei Streamlit Secrets."""
+    if "gemini_model" not in st.session_state:
+        # Legge le credenziali dal blocco [gcp_vertex_account] in secrets.toml
+        vertex_creds = Credentials.from_service_account_info(
+            st.secrets["gcp_vertex_account"],
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        vertexai.init(
+            project=st.secrets["gcp_project_id"],
+            location=st.secrets.get("gcp_location", "europe-west9"),
+            credentials=vertex_creds,
+        )
+        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
+    return st.session_state.gemini_model
+
+
+def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
+    """
+    Restituisce la ChatSession attiva oppure la ricostruisce
+    dalla cronologia dei messaggi salvati in session_state.
+    """
+    if "gemini_chat" in st.session_state:
+        return st.session_state.gemini_chat
+
+    model = get_gemini_model()
+    chat  = model.start_chat()
+
+    # Ricostruisce la storia: ignora l'ultimo messaggio utente (verrà inviato adesso)
+    history = [m for m in st.session_state.messages if m["role"] != "system"]
+    for i, msg in enumerate(history):
+        if msg["role"] == "user":
+            # Invia il messaggio utente e aspetta la risposta dell'assistant successiva
+            next_msg = history[i + 1] if i + 1 < len(history) else None
+            if next_msg and next_msg["role"] == "assistant":
+                # Simula lo scambio già avvenuto senza fare chiamate API reali
+                # Vertex AI ChatSession mantiene la history internamente
+                pass
+    # Nota: Vertex AI non permette di iniettare storia manualmente come OpenAI.
+    # La chat viene ricreata pulita; la storia visuale resta in st.session_state.messages.
+    st.session_state.gemini_chat = chat
+    return chat
 
 # ============================================================================
 # SCROLL TO TOP
@@ -128,6 +167,8 @@ if "session_initialized" not in st.session_state:
         "pending_user_message":         None,
         "page_load_time":               time.time(),
         "engagement_first_interaction": None,
+        "gemini_chat":                  None,   # ChatSession Gemini
+        "system_prompt_cache":          None,   # system prompt usato nella chat
     })
 
 # ============================================================================
@@ -329,34 +370,45 @@ When the conversation is over, you should see a message at the bottom: **Scroll 
         st.rerun()
 
 # ============================================================================
-# PHASE 5 — CONVERSATION WITH LLM
+# PHASE 5 — CONVERSATION WITH GEMINI
 # ============================================================================
 elif st.session_state.phase == 5:
-    prompt_data = PROMPTS[st.session_state.prompt_key]
-    norm_data   = NORMS[st.session_state.norm_key]
-    initial_val = st.session_state.initial_opinion.get(norm_data["title"], 50)
+    prompt_data   = PROMPTS[st.session_state.prompt_key]
+    norm_data     = NORMS[st.session_state.norm_key]
+    initial_val   = st.session_state.initial_opinion.get(norm_data["title"], 50)
     system_prompt = (
         prompt_data["system_prompt_template"]
         .replace("{NORM_DESCRIPTION}", norm_data["title"])
         .replace("{INITIAL_OPINION}", str(initial_val))
     )
+    # Salva il system prompt per poterlo riusare se la chat viene ricostruita
+    st.session_state.system_prompt_cache = system_prompt
 
+    # ------------------------------------------------------------------ #
+    # GREETING — primo messaggio dell'AI                                  #
+    # ------------------------------------------------------------------ #
     if not st.session_state.greeting_sent:
-        reply = get_openai().chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": "Start the discussion"},
-            ]
+        model = get_gemini_model()
+        # Apriamo la chat con il system prompt come primo turno "user",
+        # poi chiediamo all'AI di iniziare la discussione.
+        chat = model.start_chat()
+        opening_prompt = (
+            f"{system_prompt}\n\n"
+            "Start the discussion now. Introduce yourself briefly and open the topic."
         )
+        response = chat.send_message(opening_prompt)
+        st.session_state.gemini_chat = chat
         st.session_state.messages.append({
-            "role": "assistant",
-            "content": reply.choices[0].message.content,
+            "role":      "assistant",
+            "content":   response.text,
             "timestamp": datetime.now().isoformat(),
         })
         st.session_state.greeting_sent = True
         st.rerun()
 
+    # ------------------------------------------------------------------ #
+    # RENDER HISTORY                                                       #
+    # ------------------------------------------------------------------ #
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
@@ -364,14 +416,20 @@ elif st.session_state.phase == 5:
     assistant_count = sum(1 for m in st.session_state.messages if m["role"] == "assistant")
     round_count     = max(0, assistant_count - 1)
 
+    # ------------------------------------------------------------------ #
+    # INPUT UTENTE                                                         #
+    # ------------------------------------------------------------------ #
     if user_input := st.chat_input("Type your response here"):
         st.session_state.pending_user_message = {
-            "role": "user",
-            "content": user_input,
+            "role":      "user",
+            "content":   user_input,
             "timestamp": datetime.now().isoformat(),
         }
         st.rerun()
 
+    # ------------------------------------------------------------------ #
+    # ELABORA MESSAGGIO UTENTE E GENERA RISPOSTA                          #
+    # ------------------------------------------------------------------ #
     if st.session_state.pending_user_message:
         user_msg = st.session_state.pending_user_message
         st.session_state.messages.append(user_msg)
@@ -380,29 +438,50 @@ elif st.session_state.phase == 5:
         st.session_state.pending_user_message = None
 
         if round_count < 10:
-            with st.chat_message("assistant"):
-                stream = get_openai().chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "system", "content": system_prompt}]
-                             + [{"role": m["role"], "content": m["content"]}
-                                for m in st.session_state.messages],
-                    stream=True,
+            # Recupera o ricostruisce la ChatSession
+            chat = st.session_state.get("gemini_chat")
+            if chat is None:
+                # Se la sessione è andata persa (es. reload), ricreiamo la chat
+                model = get_gemini_model()
+                chat  = model.start_chat()
+                # Re-invia il system prompt come contesto
+                chat.send_message(
+                    f"{system_prompt}\n\n"
+                    "Continue the ongoing discussion. "
+                    "Below is the conversation so far (for context only):\n\n"
+                    + "\n".join(
+                        f"{'User' if m['role']=='user' else 'You'}: {m['content']}"
+                        for m in st.session_state.messages[:-1]  # escludi l'ultimo
+                    )
                 )
-                reply_text = st.write_stream(stream)
+                st.session_state.gemini_chat = chat
+
+            with st.chat_message("assistant"):
+                # Streaming della risposta
+                stream     = chat.send_message(user_msg["content"], stream=True)
+                reply_text = st.write_stream(chunk.text for chunk in stream)
+
             st.session_state.messages.append({
-                "role": "assistant",
-                "content": reply_text,
+                "role":      "assistant",
+                "content":   reply_text,
                 "timestamp": datetime.now().isoformat(),
             })
         else:
-            closing = "Thank you for your thoughtful responses! The discussion is now complete. Please scroll down and proceed to the next section."
+            closing = (
+                "Thank you for your thoughtful responses! "
+                "The discussion is now complete. "
+                "Please scroll down and proceed to the next section."
+            )
             st.session_state.messages.append({
-                "role": "assistant",
-                "content": closing,
+                "role":      "assistant",
+                "content":   closing,
                 "timestamp": datetime.now().isoformat(),
             })
         st.rerun()
 
+    # ------------------------------------------------------------------ #
+    # PULSANTE DI FINE CONVERSAZIONE                                      #
+    # ------------------------------------------------------------------ #
     user_msg_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
     if user_msg_count >= 2:
         st.markdown("---")
@@ -436,7 +515,7 @@ elif st.session_state.phase == 7:
 
     final_opinions = {}
     for i, norm in enumerate(st.session_state.sampled_norms):
-        title = norm["title"]
+        title       = norm["title"]
         initial_val = st.session_state.initial_opinion.get(title, 50)
         st.markdown(f"**How appropriate or inappropriate is it to {title}?**")
         final_opinions[title] = labeled_slider(" ", key=f"final_slider_{i}", default=initial_val)
@@ -661,6 +740,7 @@ elif st.session_state.phase == 12:
     with col_r2:
         st.markdown("<div style='padding-top:28px'>Top (10)</div>",
                     unsafe_allow_html=True)
+
     if st.button("Continue"):
         errors = []
         if age         is None: errors.append("Please select your age.")

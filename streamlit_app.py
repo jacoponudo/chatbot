@@ -100,10 +100,41 @@ def preload_gemini_in_background():
         try:
             get_gemini_model()
         except Exception:
-            pass  # Gli errori verranno gestiti quando il modello viene usato davvero
+            pass
     if not st.session_state.get("gemini_preload_started"):
         st.session_state.gemini_preload_started = True
         threading.Thread(target=_init, daemon=True).start()
+
+
+def precompute_greeting_in_background():
+    """
+    Precalcola il greeting dell'AI in background durante la fase 4,
+    così quando l'utente clicca 'Start Conversation' è già pronto.
+    """
+    def _generate():
+        try:
+            prompt_data   = PROMPTS[st.session_state.prompt_key]
+            norm_data     = NORMS[st.session_state.norm_key]
+            initial_val   = st.session_state.initial_opinion.get(norm_data["title"], 50)
+            system_prompt = (
+                prompt_data["system_prompt_template"]
+                .replace("{NORM_DESCRIPTION}", norm_data["title"])
+                .replace("{INITIAL_OPINION}", str(initial_val))
+            )
+            model = get_gemini_model()
+            chat  = model.start_chat()
+            response = chat.send_message(
+                f"{system_prompt}\n\nStart the discussion now. Open the topic."
+            )
+            st.session_state.precomputed_chat          = chat
+            st.session_state.precomputed_greeting      = response.text
+            st.session_state.precomputed_system_prompt = system_prompt
+        except Exception:
+            pass  # Se fallisce, la fase 5 lo rigenera normalmente
+
+    if not st.session_state.get("greeting_precompute_started"):
+        st.session_state.greeting_precompute_started = True
+        threading.Thread(target=_generate, daemon=True).start()
 
 def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
     """
@@ -378,6 +409,9 @@ Please read each AI message thoroughly, and you may have to scroll down to read 
 
 When the conversation is over, you should see a message at the bottom: **Scroll down and proceed to the next section.**""")
 
+    # Avvia il precompute del greeting in background mentre l'utente legge le istruzioni
+    precompute_greeting_in_background()
+
     if st.button("Start Conversation"):
         st.session_state.phase = 5
         scroll_to_top()
@@ -395,26 +429,30 @@ elif st.session_state.phase == 5:
         .replace("{NORM_DESCRIPTION}", norm_data["title"])
         .replace("{INITIAL_OPINION}", str(initial_val))
     )
-    # Salva il system prompt per poterlo riusare se la chat viene ricostruita
     st.session_state.system_prompt_cache = system_prompt
 
     # ------------------------------------------------------------------ #
-    # GREETING — primo messaggio dell'AI                                  #
+    # GREETING — usa il precomputed se disponibile, altrimenti lo genera  #
     # ------------------------------------------------------------------ #
     if not st.session_state.greeting_sent:
-        model = get_gemini_model()
-        # Apriamo la chat con il system prompt come primo turno "user",
-        # poi chiediamo all'AI di iniziare la discussione.
-        chat = model.start_chat()
-        opening_prompt = (
-            f"{system_prompt}\n\n"
-            "Start the discussion now. Introduce yourself briefly and open the topic."
-        )
-        response = chat.send_message(opening_prompt)
-        st.session_state.gemini_chat = chat
+        if st.session_state.get("precomputed_greeting"):
+            # ✅ Greeting già pronto — nessuna attesa
+            st.session_state.gemini_chat = st.session_state.precomputed_chat
+            greeting_text = st.session_state.precomputed_greeting
+        else:
+            # ⏳ Fallback: genera al momento (precompute non ancora finito)
+            with st.spinner("Starting conversation..."):
+                model = get_gemini_model()
+                chat  = model.start_chat()
+                response = chat.send_message(
+                    f"{system_prompt}\n\nStart the discussion now. Open the topic."
+                )
+                st.session_state.gemini_chat = chat
+                greeting_text = response.text
+
         st.session_state.messages.append({
             "role":      "assistant",
-            "content":   response.text,
+            "content":   greeting_text,
             "timestamp": datetime.now().isoformat(),
         })
         st.session_state.greeting_sent = True

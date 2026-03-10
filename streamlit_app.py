@@ -90,7 +90,7 @@ def get_gemini_model() -> GenerativeModel:
             location=st.secrets.get("gcp_location", "europe-west9"),
             credentials=vertex_creds,
         )
-        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
+        st.session_state.gemini_model = GenerativeModel("gemini-2.0-flash-lite")
     return st.session_state.gemini_model
 
 
@@ -166,7 +166,26 @@ def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
 # SCROLL TO TOP
 # ============================================================================
 def scroll_to_top():
-    st.components.v1.html("<script>window.parent.scrollTo(0, 0);</script>", height=0)
+    st.components.v1.html("""
+        <script>
+            // Tenta tutti i livelli di parent possibili
+            try { window.scrollTo(0, 0); } catch(e) {}
+            try { window.parent.scrollTo(0, 0); } catch(e) {}
+            try { window.top.scrollTo(0, 0); } catch(e) {}
+            // Forza anche lo scroll sull'elemento root del documento
+            try { document.documentElement.scrollTop = 0; } catch(e) {}
+            try { document.body.scrollTop = 0; } catch(e) {}
+            // Trova e scrolla il container principale di Streamlit
+            try {
+                window.parent.document.documentElement.scrollTop = 0;
+                window.parent.document.body.scrollTop = 0;
+            } catch(e) {}
+            try {
+                const main = window.parent.document.querySelector('.main');
+                if (main) main.scrollTop = 0;
+            } catch(e) {}
+        </script>
+    """, height=0)
 
 # ============================================================================
 # SLIDER HELPER

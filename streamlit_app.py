@@ -166,23 +166,12 @@ def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
 # SCROLL TO TOP
 # ============================================================================
 def scroll_to_top():
-    # Aggiungi un anchor invisibile in cima alla pagina
-    st.markdown('<div id="top"></div>', unsafe_allow_html=True)
-    
     js = """
     <script>
-        (function() {
-            // Trova e scrolla all'anchor
-            const top = window.parent.document.getElementById('top');
-            if (top) {
-                top.scrollIntoView({ behavior: 'smooth' });
-            } else {
-                window.parent.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-        })();
+        window.parent.document.querySelector('section.main').scrollTo({top: 0, behavior: 'instant'});
     </script>
     """
-    st.components.v1.html(js, height=0)
+    st.components.v1.html(js, height=0, scrolling=False)
 # ============================================================================
 # SLIDER HELPER
 # ============================================================================

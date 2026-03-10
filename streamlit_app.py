@@ -90,7 +90,7 @@ def get_gemini_model() -> GenerativeModel:
             location=st.secrets.get("gcp_location", "europe-west9"),
             credentials=vertex_creds,
         )
-        st.session_state.gemini_model = GenerativeModel("gemini-2.0-flash-lite")
+        st.session_state.gemini_model = GenerativeModel("gemini-3.1-flash-lite-preview")
     return st.session_state.gemini_model
 
 
@@ -168,22 +168,51 @@ def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
 def scroll_to_top():
     st.components.v1.html("""
         <script>
-            // Tenta tutti i livelli di parent possibili
-            try { window.scrollTo(0, 0); } catch(e) {}
-            try { window.parent.scrollTo(0, 0); } catch(e) {}
-            try { window.top.scrollTo(0, 0); } catch(e) {}
-            // Forza anche lo scroll sull'elemento root del documento
-            try { document.documentElement.scrollTop = 0; } catch(e) {}
-            try { document.body.scrollTop = 0; } catch(e) {}
-            // Trova e scrolla il container principale di Streamlit
-            try {
-                window.parent.document.documentElement.scrollTop = 0;
-                window.parent.document.body.scrollTop = 0;
-            } catch(e) {}
-            try {
-                const main = window.parent.document.querySelector('.main');
-                if (main) main.scrollTop = 0;
-            } catch(e) {}
+            (function() {
+                function scrollAll() {
+                    // Selettori specifici di Streamlit
+                    const selectors = [
+                        '.main',
+                        '.block-container',
+                        '[data-testid="stAppViewContainer"]',
+                        '[data-testid="stApp"]',
+                        'section.main',
+                        '.stApp',
+                    ];
+
+                    // Scrolla tutti i selettori nel documento parent
+                    selectors.forEach(sel => {
+                        try {
+                            const el = window.parent.document.querySelector(sel);
+                            if (el) {
+                                el.scrollTop = 0;
+                                el.scrollTo({ top: 0, behavior: 'instant' });
+                            }
+                        } catch(e) {}
+                    });
+
+                    // Scrolla tutti i livelli window
+                    [window, window.parent, window.top].forEach(w => {
+                        try {
+                            w.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+                        } catch(e) {}
+                    });
+
+                    // Scrolla document root e body a tutti i livelli
+                    [window.document, window.parent.document, window.top.document].forEach(doc => {
+                        try {
+                            doc.documentElement.scrollTop = 0;
+                            doc.body.scrollTop = 0;
+                        } catch(e) {}
+                    });
+                }
+
+                // Esegui subito e dopo brevi ritardi per sicurezza
+                scrollAll();
+                setTimeout(scrollAll, 50);
+                setTimeout(scrollAll, 150);
+                setTimeout(scrollAll, 300);
+            })();
         </script>
     """, height=0)
 

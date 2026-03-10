@@ -166,12 +166,33 @@ def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
 # SCROLL TO TOP
 # ============================================================================
 def scroll_to_top():
-    js = """
-    <script>
-        window.parent.document.querySelector('section.main').scrollTo({top: 0, behavior: 'instant'});
-    </script>
-    """
-    st.components.v1.html(js, height=0, scrolling=False)
+    unique = int(time.time() * 1000)
+    st.components.v1.html(
+        f"""
+        <script id="scroll_{unique}">
+            (function() {{
+                function tryScroll() {{
+                    // Streamlit 1.x
+                    let main = window.parent.document.querySelector('.main');
+                    if (main) main.scrollTop = 0;
+                    
+                    // Streamlit più recenti
+                    let appView = window.parent.document.querySelector('[data-testid="stAppViewBlockContainer"]');
+                    if (appView) appView.scrollTop = 0;
+                    
+                    let stMain = window.parent.document.querySelector('[data-testid="stMain"]');
+                    if (stMain) stMain.scrollTop = 0;
+                    
+                    window.parent.scroll(0, 0);
+                }}
+                tryScroll();
+                setTimeout(tryScroll, 100);
+                setTimeout(tryScroll, 300);
+            }})();
+        </script>
+        """,
+        height=0,
+    )
 # ============================================================================
 # SLIDER HELPER
 # ============================================================================

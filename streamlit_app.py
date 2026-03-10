@@ -34,6 +34,7 @@ def load_json(path):
 
 PROMPTS = load_json("prompts.json")
 NORMS   = load_json("norms.json")
+pos=99
 
 # ============================================================================
 # GOOGLE SHEETS — lazy
@@ -242,6 +243,7 @@ if "session_initialized" not in st.session_state:
 # ============================================================================
 # PHASE -1 — EARLY TERMINATION
 # ============================================================================
+
 if st.session_state.phase!=pos:
     scroll_to_top()
 if st.session_state.phase == -1:

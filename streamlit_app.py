@@ -242,6 +242,7 @@ if "session_initialized" not in st.session_state:
 # ============================================================================
 # PHASE -1 — EARLY TERMINATION
 # ============================================================================
+scroll_to_top()
 if st.session_state.phase == -1:
     st.markdown("## Thank you for your time.")
     st.markdown(
@@ -671,12 +672,12 @@ elif st.session_state.phase == 9:
         }
         st.session_state.phase = 10
         scroll_to_top()
-        scroll_to_top()
         st.rerun()
 
 # ============================================================================
 # PHASE 10 — CONVERSATION PERCEPTION
 # ============================================================================
+scroll_to_top()
 elif st.session_state.phase == 10:
     involvement_items = [
         ("They got me involved.",       "involvement_0"),

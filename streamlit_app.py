@@ -627,7 +627,6 @@ We will calculate the mean responses provided by the other participants the seco
 # PHASE 9 — TIGHTNESS SCALE
 # ============================================================================
 elif st.session_state.phase == 9:
-    scroll_to_top()
     st.markdown("""The following statements refer to the country in which you currently live, as a whole. Indicate whether you agree or disagree with the statements using the following scale. Note that the statements sometimes refer to "social norms," which are generally unwritten standards of behavior.""")
 
     tightness_items = [
@@ -671,6 +670,7 @@ elif st.session_state.phase == 9:
             for i, item in enumerate(tightness_items)
         }
         st.session_state.phase = 10
+        scroll_to_top()
         scroll_to_top()
         st.rerun()
 

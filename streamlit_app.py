@@ -397,6 +397,7 @@ We will calculate the mean responses provided by the other participants and comp
         st.session_state.opinions_others = opinions_others
         st.session_state.phase = 4
         scroll_to_top()
+        scroll_to_top()
         st.rerun()
 
 # ============================================================================
@@ -414,6 +415,7 @@ When the conversation is over, you should see a message at the bottom: **Scroll 
 
     if st.button("Start Conversation"):
         st.session_state.phase = 5
+        scroll_to_top()
         scroll_to_top()
         st.rerun()
 
@@ -541,6 +543,7 @@ elif st.session_state.phase == 5:
         if st.button("End Discussion & Continue"):
             st.session_state.phase = 6
             scroll_to_top()
+            scroll_to_top()
             st.rerun()
 
 # ============================================================================
@@ -556,6 +559,7 @@ elif st.session_state.phase == 6:
             st.stop()
         st.session_state.att_check_response_saved = st.session_state.att_check_response
         st.session_state.phase = 7
+        scroll_to_top()
         scroll_to_top()
         st.rerun()
 
@@ -576,6 +580,7 @@ elif st.session_state.phase == 7:
         st.session_state.final_opinion = final_opinions
         st.session_state.phase = 8
         scroll_to_top()
+        scroll_to_top()
         st.rerun()
 
 # ============================================================================
@@ -595,6 +600,7 @@ We will calculate the mean responses provided by the other participants the seco
     if st.button("Continue"):
         st.session_state.opinions_others_final = opinions_others_final
         st.session_state.phase = 9
+        scroll_to_top()
         scroll_to_top()
         st.rerun()
 
@@ -645,6 +651,7 @@ elif st.session_state.phase == 9:
             for i, item in enumerate(tightness_items)
         }
         st.session_state.phase = 10
+        scroll_to_top()
         scroll_to_top()
         st.rerun()
 
@@ -704,6 +711,7 @@ elif st.session_state.phase == 10:
         st.session_state.threat_responses      = {l: st.session_state[k] for l, k in threat_items}
         st.session_state.source_responses      = {l: st.session_state[k] for l, k in source_items}
         st.session_state.phase = 11
+        scroll_to_top()
         scroll_to_top()
         st.rerun()
 

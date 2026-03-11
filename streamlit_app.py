@@ -465,7 +465,7 @@ elif st.session_state.phase == 5:
                 model = get_gemini_model()
                 chat  = model.start_chat()
                 response = chat.send_message(
-                    f"{system_prompt}\n\nStart the discussion now. Open the topic."
+                    f"{system_prompt}\n\nStart the discussion now. Present the norm you would like to discuss about."
                 )
                 st.session_state.gemini_chat = chat
                 greeting_text = response.text

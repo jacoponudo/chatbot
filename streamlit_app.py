@@ -198,13 +198,13 @@ def scroll_to_top_on_phase_entry():
 # LIKERT-7 HELPER  (replaces slider — 7 buttons, nothing selected by default)
 # ============================================================================
 LIKERT_LABELS = [
-    "1\nCompletely\ninappropriate",
+    "1",
     "2",
     "3",
-    "4\nNeither / nor",
+    "4",
     "5",
     "6",
-    "7\nCompletely\nappropriate",
+    "7",
 ]
 
 def likert_7(key):

@@ -642,7 +642,7 @@ elif st.session_state.phase == 8:
 
     st.markdown(f"*Question {i + 1} of {total}*")
     st.markdown("""We will now ask you again what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors from 0 (completely inappropriate) to 100 (completely appropriate).
-
+                Others like you have also had a conversation with the advanced AI.
 We will calculate the mean responses provided by the other participants the second time they were asked and compare them with the estimate you provided. If your estimate is correct (±3), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
 
     st.markdown(f"**{norm['title']}**")

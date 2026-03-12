@@ -282,7 +282,7 @@ elif st.session_state.phase == 0:
 You are being invited to participate in a study of social norms. The purpose of this study is to analyze everyday norms – i.e., norms about behavior that many people perform regularly, and most people could perform if they wanted to – and to understand how people engage in conversations about these topics with an advanced AI.
 
 **What will I be asked to do?**  
-If you agree to take part, you will be asked to answer a set of survey questions related to social norms. These include questions about how appropriate you and other people think behaviors are in different settings. Concerning questions about how other people perceive behaviors, you will receive a bonus payment if you make a correct guess. Next, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The study should take approximately *(TBD)* minutes to complete.
+If you agree to take part, you will be asked to answer a set of survey questions related to social norms. These include questions about how appropriate you and other people think behaviors are in different settings. Concerning questions about how other people perceive behaviors, you will receive a bonus payment if you make a correct guess. Next, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The study should take approximately 12 minutes to complete.
 
 **Can I change my mind?**  
 Participation is voluntary and you can decline to participate in the research or any aspects of the research at any time without penalty. You may withdraw by simply closing the browser on the computer. It will not be possible for you to withdraw after the completion of the survey because your responses are anonymous.
@@ -294,7 +294,7 @@ There are no direct risk to you as a participant. Study results will help inform
 The data that you provide will be anonymous so your responses cannot be linked back to you. The study data will be stored on an encrypted server at *(TBD)*. The anonymous dataset will be stored indefinitely and shared with other researchers for research and teaching purposes. We plan to publish the results of this study in academic journals and present them at conferences.
 
 **Any questions?**  
-If you have any questions about the research, please contact *(TBD)*.
+If you have any questions about the research, please contact jacopo.nudo@uniroma1.it .
 
 By clicking "I agree" below you are indicating that you have read this information and agree to participate in this research study.
 """)

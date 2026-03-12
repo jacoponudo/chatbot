@@ -19,7 +19,7 @@ st.set_page_config(
     page_title="Online Discussion Study",
     page_icon="💬",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_ebar="collapsed"
 )
 
 # ============================================================================
@@ -78,7 +78,6 @@ def save_to_google_sheets(row):
 # VERTEX AI / GEMINI CLIENT — lazy
 # ============================================================================
 def get_gemini_model() -> GenerativeModel:
-    """Inizializza Vertex AI usando le credenziali nei Streamlit Secrets."""
     if "gemini_model" not in st.session_state:
         vertex_creds = Credentials.from_service_account_info(
             st.secrets["gcp_vertex_account"],
@@ -94,7 +93,6 @@ def get_gemini_model() -> GenerativeModel:
 
 
 def preload_gemini_in_background():
-    """Avvia l'inizializzazione di Vertex AI in un thread separato."""
     def _init():
         try:
             get_gemini_model()
@@ -106,10 +104,6 @@ def preload_gemini_in_background():
 
 
 def precompute_greeting_in_background():
-    """
-    Precalcola il greeting dell'AI in background durante la fase 4,
-    così quando l'utente clicca 'Start Conversation' è già pronto.
-    """
     def _generate():
         try:
             prompt_data   = PROMPTS[st.session_state.prompt_key]
@@ -136,10 +130,6 @@ def precompute_greeting_in_background():
         threading.Thread(target=_generate, daemon=True).start()
 
 def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
-    """
-    Restituisce la ChatSession attiva oppure la ricostruisce
-    dalla cronologia dei messaggi salvati in session_state.
-    """
     if "gemini_chat" in st.session_state:
         return st.session_state.gemini_chat
 
@@ -165,17 +155,12 @@ def scroll_to_top():
         <script id="scroll_{unique}">
             (function() {{
                 function tryScroll() {{
-                    // Streamlit 1.x
                     let main = window.parent.document.querySelector('.main');
                     if (main) main.scrollTop = 0;
-                    
-                    // Streamlit più recenti
                     let appView = window.parent.document.querySelector('[data-testid="stAppViewBlockContainer"]');
                     if (appView) appView.scrollTop = 0;
-                    
                     let stMain = window.parent.document.querySelector('[data-testid="stMain"]');
                     if (stMain) stMain.scrollTop = 0;
-                    
                     window.parent.scroll(0, 0);
                 }}
                 tryScroll();
@@ -188,28 +173,28 @@ def scroll_to_top():
     )
 
 def scroll_to_top_on_phase_entry():
-    """Triggers scroll_to_top only the first time a phase is rendered."""
     current_phase = st.session_state.phase
     if st.session_state.get("last_scrolled_phase") != current_phase:
         scroll_to_top()
         st.session_state.last_scrolled_phase = current_phase
 
 # ============================================================================
-# LIKERT-7 HELPER  (replaces slider — 7 buttons, nothing selected by default)
+# LIKERT-7 HELPER
+# CHANGE 2: Labels now include text descriptors alongside numbers
 # ============================================================================
 LIKERT_LABELS = [
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
+    "1\nExtremely\ninappropriate",
+    "2\nVery\ninappropriate",
+    "3\nSomewhat\ninappropriate",
+    "4\nNeither",
+    "5\nSomewhat\nappropriate",
+    "6\nVery\nappropriate",
+    "7\nExtremely\nappropriate",
 ]
 
 def likert_7(key):
     """
-    Renders a 7-point Likert scale as clickable buttons.
+    Renders a 7-point Likert scale as clickable buttons with descriptive labels.
     Returns the selected integer (1-7) or None if nothing selected yet.
     Stores selection in st.session_state[key].
     """
@@ -250,7 +235,7 @@ if "session_initialized" not in st.session_state:
         "engagement_first_interaction": None,
         "gemini_chat":                  None,
         "system_prompt_cache":          None,
-        "last_scrolled_phase":          None,   # tracks which phase was last scrolled
+        "last_scrolled_phase":          None,
     })
 
 # ============================================================================
@@ -387,6 +372,7 @@ elif st.session_state.phase == 1:
 
 # ============================================================================
 # PHASE 2 — INITIAL APPROPRIATENESS RATINGS (one norm per screen)
+# CHANGE 1: Norm presented as "the action of: '<norm title>'"
 # ============================================================================
 elif st.session_state.phase == 2:
     if "prompt_key" not in st.session_state:
@@ -416,7 +402,7 @@ elif st.session_state.phase == 2:
 
 Your task in each case is simply to rate, on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate), the appropriateness of the particular behavior in the situation that is given.""")
 
-    st.markdown(f"**How appropriate or inappropriate is it to {norm['title']}?**")
+    st.markdown(f"**How appropriate or inappropriate is the action of: '{norm['title']}'?**")
     val = likert_7(key=f"likert_p2_{i}")
 
     if st.button("Continue"):
@@ -433,6 +419,7 @@ Your task in each case is simply to rate, on a 7-point scale from 1 (completely 
 
 # ============================================================================
 # PHASE 3 — EXPECTED OTHERS' RATINGS (one norm per screen)
+# CHANGE 1: Norm presented as "the action of: '<norm title>'"
 # ============================================================================
 elif st.session_state.phase == 3:
     if "phase3_index" not in st.session_state:
@@ -456,7 +443,7 @@ elif st.session_state.phase == 3:
 
 We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
 
-    st.markdown(f"**What rating do you think other UK participants gave for: {norm['title']}?**")
+    st.markdown(f"**What rating do you think other UK participants gave for the action of: '{norm['title']}'?**")
     st.markdown("Other respondents' average appropriateness rating:")
     val = likert_7(key=f"likert_p3_{i}")
 
@@ -538,7 +525,7 @@ elif st.session_state.phase == 5:
     round_count     = max(0, assistant_count - 1)
 
     # ------------------------------------------------------------------ #
-    # INPUT UTENTE                                                         #
+    # USER INPUT                                                           #
     # ------------------------------------------------------------------ #
     if user_input := st.chat_input("Type your response here"):
         st.session_state.pending_user_message = {
@@ -549,7 +536,7 @@ elif st.session_state.phase == 5:
         st.rerun()
 
     # ------------------------------------------------------------------ #
-    # ELABORA MESSAGGIO UTENTE E GENERA RISPOSTA                          #
+    # PROCESS USER MESSAGE AND GENERATE RESPONSE                          #
     # ------------------------------------------------------------------ #
     if st.session_state.pending_user_message:
         user_msg = st.session_state.pending_user_message
@@ -597,12 +584,10 @@ elif st.session_state.phase == 5:
         st.rerun()
 
     # ------------------------------------------------------------------ #
-    # PULSANTE DI FINE CONVERSAZIONE                                      #
+    # END CONVERSATION BUTTON                                              #
     # ------------------------------------------------------------------ #
     user_msg_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
 
-    st.markdown("---")
-    st.markdown("*Scroll down and proceed to the next section.*")
     if st.button("End Discussion & Continue"):
         if user_msg_count >= 2:
             st.session_state.phase = 6
@@ -625,6 +610,7 @@ elif st.session_state.phase == 6:
 
 # ============================================================================
 # PHASE 7 — FINAL APPROPRIATENESS RATINGS (one norm per screen)
+# CHANGE 1: Norm presented as "the action of: '<norm title>'"
 # ============================================================================
 elif st.session_state.phase == 7:
     if "phase7_index" not in st.session_state:
@@ -640,7 +626,7 @@ elif st.session_state.phase == 7:
     st.markdown(f"*Question {i + 1} of {total}*")
     st.markdown("We ask you again to rate, on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate), the appropriateness of these behaviors.")
 
-    st.markdown(f"**How appropriate or inappropriate is it to {title}?**")
+    st.markdown(f"**How appropriate or inappropriate is the action of: '{title}'?**")
     val = likert_7(key=f"likert_p7_{i}")
 
     if st.button("Continue"):
@@ -656,99 +642,46 @@ elif st.session_state.phase == 7:
             st.rerun()
 
 # ============================================================================
-# PHASE 8 — FINAL EXPECTED OTHERS' RATINGS (one norm per screen)
+# PHASE 8 — FINAL EXPECTED OTHERS' RATINGS
+# CHANGE 3: Only ask about the norm that was discussed with the AI,
+#           with framing that other participants also had an AI conversation
+# CHANGE 1: Norm presented as "the action of: '<norm title>'"
 # ============================================================================
 elif st.session_state.phase == 8:
-    if "phase8_index" not in st.session_state:
-        st.session_state.phase8_index = 0
     if "opinions_others_final" not in st.session_state:
         st.session_state.opinions_others_final = {}
 
-    i     = st.session_state.phase8_index
-    norm  = st.session_state.sampled_norms[i]
-    total = len(st.session_state.sampled_norms)
+    norm_data = NORMS[st.session_state.norm_key]
+    title     = norm_data["title"]
 
-    st.markdown(f"*Question {i + 1} of {total}*")
+    st.markdown("---")
+    st.markdown("## Now: What do others think?")
+    st.markdown("In this next section, we shift again from asking about **your own opinion** to asking about **how you think other people responded**.")
+    st.markdown("---")
 
-    if i == 0:
-        st.markdown("---")
-        st.markdown("## Now: What do others think?")
-        st.markdown("In this next section, we shift again from asking about **your own opinion** to asking about **how you think other people responded**.")
-        st.markdown("---")
+    st.markdown(f"""We will now ask you what you think the other participants of this study from the UK have on average rated the appropriateness of one specific behavior on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate).
 
-    st.markdown("""We will now ask you again what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate).
+Just like you, the other participants also had a conversation with an AI about this topic before being asked this question again. Please imagine that their opinion may have been influenced by that interaction as well.
 
-We will calculate the mean responses provided by the other participants the second time they were asked and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
+We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50.""")
 
-    st.markdown(f"**What rating do you think other UK participants gave for: {norm['title']}?**")
+    st.markdown(f"**What rating do you think other UK participants gave (after their AI conversation) for the action of: '{title}'?**")
     st.markdown("Other respondents' average appropriateness rating:")
-    val = likert_7(key=f"likert_p8_{i}")
+    val = likert_7(key="likert_p8_0")
 
     if st.button("Continue"):
         if val is None:
             st.warning("Please select a response before continuing.")
             st.stop()
-        st.session_state.opinions_others_final[norm['title']] = val
-        if i + 1 < total:
-            st.session_state.phase8_index += 1
-            st.rerun()
-        else:
-            st.session_state.phase = 9
-            st.rerun()
-
-# ============================================================================
-# PHASE 9 — TIGHTNESS SCALE
-# ============================================================================
-elif st.session_state.phase == 9:
-    st.markdown("""The following statements refer to the country in which you currently live, as a whole. Indicate whether you agree or disagree with the statements using the following scale. Note that the statements sometimes refer to "social norms," which are generally unwritten standards of behavior.""")
-
-    tightness_items = [
-        "In this country, there are many social norms that people should abide by.",
-        "In this country, there are very clear expectations for how people should behave in most situations.",
-        "In this country, people agree on which behaviors are appropriate and which are inappropriate in most situations.",
-        "In this country, people have a great deal of freedom in deciding how they want to behave in most situations.",
-        "In this country, if someone behaves inappropriately, others will strongly disapprove.",
-        "In this country, people almost always comply with social norms.",
-        "In this country, people have very little freedom in deciding how they want to behave in most situations.",
-    ]
-    scale_labels = ["Strongly disagree", "Moderately disagree", "Slightly disagree",
-                    "Slightly agree", "Moderately agree", "Strongly agree"]
-
-    for i, item in enumerate(tightness_items):
-        st.markdown(f"**{item}**")
-        cols     = st.columns(6)
-        selected = st.session_state.get(f"tight_{i}")
-        for j, label in enumerate(scale_labels):
-            val = j + 1
-            with cols[j]:
-                if st.button(label, key=f"tight_{i}_{val}", use_container_width=True,
-                             type="primary" if selected == val else "secondary"):
-                    st.session_state[f"tight_{i}"] = val
-                    st.rerun()
-        st.markdown("")
-
-    st.markdown("---")
-    st.text_area(
-        "Is there anything you would like to add or do you want to clarify about your answers?",
-        height=100, key="tightness_open"
-    )
-
-    if st.button("Continue"):
-        missing = [i for i in range(len(tightness_items)) if not st.session_state.get(f"tight_{i}")]
-        if missing:
-            st.warning("Please respond to all statements before continuing.")
-            st.stop()
-        st.session_state.tightness_responses = {
-            item: st.session_state[f"tight_{i}"]
-            for i, item in enumerate(tightness_items)
-        }
-        st.session_state.phase = 10
+        st.session_state.opinions_others_final[title] = val
+        st.session_state.phase = 9
         st.rerun()
 
 # ============================================================================
-# PHASE 10 — CONVERSATION PERCEPTION
+# PHASE 9 — CONVERSATION PERCEPTION  (was Phase 10)
+# CHANGE 4: Swapped order — Conversation Perception now comes before Tightness
 # ============================================================================
-elif st.session_state.phase == 10:
+elif st.session_state.phase == 9:
     involvement_items = [
         ("They got me involved.",       "involvement_0"),
         ("They seemed relevant to me.", "involvement_1"),
@@ -799,6 +732,56 @@ elif st.session_state.phase == 10:
         st.session_state.involvement_responses = {l: st.session_state[k] for l, k in involvement_items}
         st.session_state.threat_responses      = {l: st.session_state[k] for l, k in threat_items}
         st.session_state.source_responses      = {l: st.session_state[k] for l, k in source_items}
+        st.session_state.phase = 10
+        st.rerun()
+
+# ============================================================================
+# PHASE 10 — TIGHTNESS SCALE  (was Phase 9)
+# CHANGE 4: Swapped order — Tightness now comes after Conversation Perception
+# ============================================================================
+elif st.session_state.phase == 10:
+    st.markdown("""The following statements refer to the country in which you currently live, as a whole. Indicate whether you agree or disagree with the statements using the following scale. Note that the statements sometimes refer to "social norms," which are generally unwritten standards of behavior.""")
+
+    tightness_items = [
+        "In this country, there are many social norms that people should abide by.",
+        "In this country, there are very clear expectations for how people should behave in most situations.",
+        "In this country, people agree on which behaviors are appropriate and which are inappropriate in most situations.",
+        "In this country, people have a great deal of freedom in deciding how they want to behave in most situations.",
+        "In this country, if someone behaves inappropriately, others will strongly disapprove.",
+        "In this country, people almost always comply with social norms.",
+        "In this country, people have very little freedom in deciding how they want to behave in most situations.",
+    ]
+    scale_labels = ["Strongly disagree", "Moderately disagree", "Slightly disagree",
+                    "Slightly agree", "Moderately agree", "Strongly agree"]
+
+    for i, item in enumerate(tightness_items):
+        st.markdown(f"**{item}**")
+        cols     = st.columns(6)
+        selected = st.session_state.get(f"tight_{i}")
+        for j, label in enumerate(scale_labels):
+            val = j + 1
+            with cols[j]:
+                if st.button(label, key=f"tight_{i}_{val}", use_container_width=True,
+                             type="primary" if selected == val else "secondary"):
+                    st.session_state[f"tight_{i}"] = val
+                    st.rerun()
+        st.markdown("")
+
+    st.markdown("---")
+    st.text_area(
+        "Is there anything you would like to add or do you want to clarify about your answers?",
+        height=100, key="tightness_open"
+    )
+
+    if st.button("Continue"):
+        missing = [i for i in range(len(tightness_items)) if not st.session_state.get(f"tight_{i}")]
+        if missing:
+            st.warning("Please respond to all statements before continuing.")
+            st.stop()
+        st.session_state.tightness_responses = {
+            item: st.session_state[f"tight_{i}"]
+            for i, item in enumerate(tightness_items)
+        }
         st.session_state.phase = 11
         st.rerun()
 

@@ -288,7 +288,7 @@ If you agree to take part, you will be asked to answer a set of survey questions
 Participation is voluntary and you can decline to participate in the research or any aspects of the research at any time without penalty. You may withdraw by simply closing the browser on the computer. It will not be possible for you to withdraw after the completion of the survey because your responses are anonymous.
 
 **Risks and benefits**  
-There are no direct benefits to you as a participant. Study results will help inform the scholarly understanding of AI conversations about everyday norms work. There is a risk that some of the questions may be sensitive and/or could cause you psychological distress. You don't have to answer any questions you don't want to. There are questions where you will receive a bonus payment of £0.50 if you answer correctly (two questions, for a maximum of £1).
+There are no direct risk to you as a participant. Study results will help inform the scholarly understanding of AI conversations about everyday norms work. There is a risk that some of the questions may be sensitive and/or could cause you psychological distress. You don't have to answer any questions you don't want to. There are questions where you will receive a bonus payment of £0.50 if you answer correctly (two questions, for a maximum of £1).
 
 **Privacy and data**  
 The data that you provide will be anonymous so your responses cannot be linked back to you. The study data will be stored on an encrypted server at *(TBD)*. The anonymous dataset will be stored indefinitely and shared with other researchers for research and teaching purposes. We plan to publish the results of this study in academic journals and present them at conferences.

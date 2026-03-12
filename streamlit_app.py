@@ -374,7 +374,7 @@ elif st.session_state.phase == 1:
         st.rerun()
 
 # ============================================================================
-# PHASE 2 — INITIAL APPROPRIATENESS RATINGS
+# PHASE 2 — INITIAL APPROPRIATENESS RATINGS (one norm per screen)
 # ============================================================================
 elif st.session_state.phase == 2:
     if "prompt_key" not in st.session_state:
@@ -390,38 +390,62 @@ elif st.session_state.phase == 2:
         random.shuffle(sampled)
         st.session_state.sampled_norms = sampled
 
+    if "phase2_index" not in st.session_state:
+        st.session_state.phase2_index = 0
+    if "initial_opinion" not in st.session_state:
+        st.session_state.initial_opinion = {}
+
+    i     = st.session_state.phase2_index
+    norm  = st.session_state.sampled_norms[i]
+    total = len(st.session_state.sampled_norms)
+
+    st.markdown(f"*Question {i + 1} of {total}*")
     st.markdown("""From various sources in our everyday lives we have all developed a subjective "impression" or "feeling" for the appropriateness of any given behavior in a particular situation. In this study, we are interested in your judgment of the appropriateness of some particular behaviors in some particular settings.
 
 Your task in each case is simply to rate, on a scale from 0 (completely inappropriate) to 100 (completely appropriate), the appropriateness of the particular behavior in the situation that is given.""")
 
-    opinions = {}
-    for i, norm in enumerate(st.session_state.sampled_norms):
-        st.markdown(f"**How appropriate or inappropriate is it to {norm['title']}?**")
-        opinions[norm['title']] = labeled_slider(" ", key=f"slider_{i}", default=50)
+    st.markdown(f"**How appropriate or inappropriate is it to {norm['title']}?**")
+    val = labeled_slider(" ", key=f"slider_p2_{i}", default=50)
 
     if st.button("Continue"):
-        st.session_state.initial_opinion = opinions
-        st.session_state.phase = 3
-        st.rerun()
+        st.session_state.initial_opinion[norm['title']] = val
+        if i + 1 < total:
+            st.session_state.phase2_index += 1
+            st.rerun()
+        else:
+            st.session_state.phase = 3
+            st.rerun()
 
 # ============================================================================
-# PHASE 3 — EXPECTED OTHERS' RATINGS (initial)
+# PHASE 3 — EXPECTED OTHERS' RATINGS (one norm per screen)
 # ============================================================================
 elif st.session_state.phase == 3:
+    if "phase3_index" not in st.session_state:
+        st.session_state.phase3_index = 0
+    if "opinions_others" not in st.session_state:
+        st.session_state.opinions_others = {}
+
+    i     = st.session_state.phase3_index
+    norm  = st.session_state.sampled_norms[i]
+    total = len(st.session_state.sampled_norms)
+
+    st.markdown(f"*Question {i + 1} of {total}*")
     st.markdown("""We will now ask you what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors from 0 (completely inappropriate) to 100 (completely appropriate).
 
 We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±3), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
 
-    opinions_others = {}
-    for i, norm in enumerate(st.session_state.sampled_norms):
-        st.markdown(f"**{norm['title']}**")
-        st.markdown("Other respondents' average appropriateness rating:")
-        opinions_others[norm['title']] = labeled_slider(" ", key=f"group_slider_{i}", default=50)
+    st.markdown(f"**{norm['title']}**")
+    st.markdown("Other respondents' average appropriateness rating:")
+    val = labeled_slider(" ", key=f"group_slider_p3_{i}", default=50)
 
     if st.button("Continue"):
-        st.session_state.opinions_others = opinions_others
-        st.session_state.phase = 4
-        st.rerun()
+        st.session_state.opinions_others[norm['title']] = val
+        if i + 1 < total:
+            st.session_state.phase3_index += 1
+            st.rerun()
+        else:
+            st.session_state.phase = 4
+            st.rerun()
 
 # ============================================================================
 # PHASE 4 — INSTRUCTIONS FOR CONVERSATION
@@ -574,41 +598,65 @@ elif st.session_state.phase == 6:
         st.rerun()
 
 # ============================================================================
-# PHASE 7 — FINAL APPROPRIATENESS RATINGS
+# PHASE 7 — FINAL APPROPRIATENESS RATINGS (one norm per screen)
 # ============================================================================
 elif st.session_state.phase == 7:
+    if "phase7_index" not in st.session_state:
+        st.session_state.phase7_index = 0
+    if "final_opinion" not in st.session_state:
+        st.session_state.final_opinion = {}
+
+    i     = st.session_state.phase7_index
+    norm  = st.session_state.sampled_norms[i]
+    total = len(st.session_state.sampled_norms)
+    title = norm["title"]
+    initial_val = st.session_state.initial_opinion.get(title, 50)
+
+    st.markdown(f"*Question {i + 1} of {total}*")
     st.markdown("We ask you again to rate, on a scale from 0 (completely inappropriate) to 100 (completely appropriate), the appropriateness of these behaviors.")
 
-    final_opinions = {}
-    for i, norm in enumerate(st.session_state.sampled_norms):
-        title       = norm["title"]
-        initial_val = st.session_state.initial_opinion.get(title, 50)
-        st.markdown(f"**How appropriate or inappropriate is it to {title}?**")
-        final_opinions[title] = labeled_slider(" ", key=f"final_slider_{i}", default=initial_val)
+    st.markdown(f"**How appropriate or inappropriate is it to {title}?**")
+    val = labeled_slider(" ", key=f"final_slider_p7_{i}", default=initial_val)
 
     if st.button("Continue"):
-        st.session_state.final_opinion = final_opinions
-        st.session_state.phase = 8
-        st.rerun()
+        st.session_state.final_opinion[title] = val
+        if i + 1 < total:
+            st.session_state.phase7_index += 1
+            st.rerun()
+        else:
+            st.session_state.phase = 8
+            st.rerun()
 
 # ============================================================================
-# PHASE 8 — FINAL EXPECTED OTHERS' RATINGS
+# PHASE 8 — FINAL EXPECTED OTHERS' RATINGS (one norm per screen)
 # ============================================================================
 elif st.session_state.phase == 8:
+    if "phase8_index" not in st.session_state:
+        st.session_state.phase8_index = 0
+    if "opinions_others_final" not in st.session_state:
+        st.session_state.opinions_others_final = {}
+
+    i     = st.session_state.phase8_index
+    norm  = st.session_state.sampled_norms[i]
+    total = len(st.session_state.sampled_norms)
+
+    st.markdown(f"*Question {i + 1} of {total}*")
     st.markdown("""We will now ask you again what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors from 0 (completely inappropriate) to 100 (completely appropriate).
 
 We will calculate the mean responses provided by the other participants the second time they were asked and compare them with the estimate you provided. If your estimate is correct (±3), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
 
-    opinions_others_final = {}
-    for i, norm in enumerate(st.session_state.sampled_norms):
-        st.markdown(f"**{norm['title']}**")
-        st.markdown("Other respondents' average appropriateness rating:")
-        opinions_others_final[norm['title']] = labeled_slider(" ", key=f"group_final_slider_{i}", default=50)
+    st.markdown(f"**{norm['title']}**")
+    st.markdown("Other respondents' average appropriateness rating:")
+    val = labeled_slider(" ", key=f"group_final_slider_p8_{i}", default=50)
 
     if st.button("Continue"):
-        st.session_state.opinions_others_final = opinions_others_final
-        st.session_state.phase = 9
-        st.rerun()
+        st.session_state.opinions_others_final[norm['title']] = val
+        if i + 1 < total:
+            st.session_state.phase8_index += 1
+            st.rerun()
+        else:
+            st.session_state.phase = 9
+            st.rerun()
 
 # ============================================================================
 # PHASE 9 — TIGHTNESS SCALE

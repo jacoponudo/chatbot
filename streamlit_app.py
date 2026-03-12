@@ -195,24 +195,36 @@ def scroll_to_top_on_phase_entry():
         st.session_state.last_scrolled_phase = current_phase
 
 # ============================================================================
-# SLIDER HELPER
+# LIKERT-7 HELPER  (replaces slider — 7 buttons, nothing selected by default)
 # ============================================================================
-def labeled_slider(label, key, default=50):
-    col_left, col_mid, col_right = st.columns([1, 6, 1])
-    with col_left:
-        st.markdown(
-            "<div style='text-align:left; padding-top:28px'>0<br><small>Completely<br>inappropriate</small></div>",
-            unsafe_allow_html=True
-        )
-    with col_mid:
-        val = st.slider(label, 0, 100, default, key=key, label_visibility="collapsed")
-    with col_right:
-        st.markdown(
-            "<div style='text-align:right; padding-top:28px'>100<br><small>Completely<br>appropriate</small></div>",
-            unsafe_allow_html=True
-        )
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    return val
+LIKERT_LABELS = [
+    "1\nCompletely\ninappropriate",
+    "2",
+    "3",
+    "4\nNeither / nor",
+    "5",
+    "6",
+    "7\nCompletely\nappropriate",
+]
+
+def likert_7(key):
+    """
+    Renders a 7-point Likert scale as clickable buttons.
+    Returns the selected integer (1-7) or None if nothing selected yet.
+    Stores selection in st.session_state[key].
+    """
+    selected = st.session_state.get(key)
+    cols = st.columns(7)
+    for j, label in enumerate(LIKERT_LABELS):
+        val = j + 1
+        with cols[j]:
+            btn_type = "primary" if selected == val else "secondary"
+            if st.button(label, key=f"{key}_btn_{val}",
+                         use_container_width=True, type=btn_type):
+                st.session_state[key] = val
+                st.rerun()
+    st.markdown("<br>", unsafe_allow_html=True)
+    return st.session_state.get(key)
 
 # ============================================================================
 # PROLIFIC ID
@@ -402,12 +414,15 @@ elif st.session_state.phase == 2:
     st.markdown(f"*Question {i + 1} of {total}*")
     st.markdown("""From various sources in our everyday lives we have all developed a subjective "impression" or "feeling" for the appropriateness of any given behavior in a particular situation. In this study, we are interested in your judgment of the appropriateness of some particular behaviors in some particular settings.
 
-Your task in each case is simply to rate, on a scale from 0 (completely inappropriate) to 100 (completely appropriate), the appropriateness of the particular behavior in the situation that is given.""")
+Your task in each case is simply to rate, on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate), the appropriateness of the particular behavior in the situation that is given.""")
 
     st.markdown(f"**How appropriate or inappropriate is it to {norm['title']}?**")
-    val = labeled_slider(" ", key=f"slider_p2_{i}", default=50)
+    val = likert_7(key=f"likert_p2_{i}")
 
     if st.button("Continue"):
+        if val is None:
+            st.warning("Please select a response before continuing.")
+            st.stop()
         st.session_state.initial_opinion[norm['title']] = val
         if i + 1 < total:
             st.session_state.phase2_index += 1
@@ -430,15 +445,25 @@ elif st.session_state.phase == 3:
     total = len(st.session_state.sampled_norms)
 
     st.markdown(f"*Question {i + 1} of {total}*")
-    st.markdown("""We will now ask you what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors from 0 (completely inappropriate) to 100 (completely appropriate).
 
-We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±3), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
+    if i == 0:
+        st.markdown("---")
+        st.markdown("## Now: What do others think?")
+        st.markdown("In this next section, we shift from asking about **your own opinion** to asking about **how you think other people responded**.")
+        st.markdown("---")
 
-    st.markdown(f"**{norm['title']}**")
+    st.markdown("""We will now ask you what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate).
+
+We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
+
+    st.markdown(f"**What rating do you think other UK participants gave for: {norm['title']}?**")
     st.markdown("Other respondents' average appropriateness rating:")
-    val = labeled_slider(" ", key=f"group_slider_p3_{i}", default=50)
+    val = likert_7(key=f"likert_p3_{i}")
 
     if st.button("Continue"):
+        if val is None:
+            st.warning("Please select a response before continuing.")
+            st.stop()
         st.session_state.opinions_others[norm['title']] = val
         if i + 1 < total:
             st.session_state.phase3_index += 1
@@ -451,7 +476,7 @@ We will calculate the mean responses provided by the other participants and comp
 # PHASE 4 — INSTRUCTIONS FOR CONVERSATION
 # ============================================================================
 elif st.session_state.phase == 4:
-    st.markdown("""Now, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The purpose of this dialogue is to see how humans and AI interact. Please be open and honest in your responses. Remember that the AI is neutral and non-judgmental, and your participation is confidential. When the conversation begins, you should see an orange robot icon indicating it's generating responses. It can sometimes take up to 30s. If you don't see any icons or if it's taking too long to generate responses, try refreshing the page. If you run into further issues, please let us know.
+    st.markdown("""Now, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The purpose of this dialogue is to see how humans and AI interact. Please be open and honest in your responses. Remember that the AI is neutral and non-judgmental, and your participation is confidential. When the conversation begins, you should see an AI icon with chat bubbles "..." indicating it's generating responses. It can sometimes take up to 30s. If you don't see any icons or if it's taking too long to generate responses, try refreshing the page. If you run into further issues, please let us know.
 
 Please read each AI message thoroughly, and you may have to scroll down to read its full message. You will be asked some questions about your interaction. You will have to write at least 2 messages to the AI, up to a maximum of 10.
 
@@ -610,15 +635,17 @@ elif st.session_state.phase == 7:
     norm  = st.session_state.sampled_norms[i]
     total = len(st.session_state.sampled_norms)
     title = norm["title"]
-    initial_val = st.session_state.initial_opinion.get(title, 50)
 
     st.markdown(f"*Question {i + 1} of {total}*")
-    st.markdown("We ask you again to rate, on a scale from 0 (completely inappropriate) to 100 (completely appropriate), the appropriateness of these behaviors.")
+    st.markdown("We ask you again to rate, on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate), the appropriateness of these behaviors.")
 
     st.markdown(f"**How appropriate or inappropriate is it to {title}?**")
-    val = labeled_slider(" ", key=f"final_slider_p7_{i}", default=initial_val)
+    val = likert_7(key=f"likert_p7_{i}")
 
     if st.button("Continue"):
+        if val is None:
+            st.warning("Please select a response before continuing.")
+            st.stop()
         st.session_state.final_opinion[title] = val
         if i + 1 < total:
             st.session_state.phase7_index += 1
@@ -641,15 +668,25 @@ elif st.session_state.phase == 8:
     total = len(st.session_state.sampled_norms)
 
     st.markdown(f"*Question {i + 1} of {total}*")
-    st.markdown("""We will now ask you again what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors from 0 (completely inappropriate) to 100 (completely appropriate).
-                Others like you have also had a conversation with the advanced AI.
-We will calculate the mean responses provided by the other participants the second time they were asked and compare them with the estimate you provided. If your estimate is correct (±3), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
 
-    st.markdown(f"**{norm['title']}**")
+    if i == 0:
+        st.markdown("---")
+        st.markdown("## Now: What do others think?")
+        st.markdown("In this next section, we shift again from asking about **your own opinion** to asking about **how you think other people responded**.")
+        st.markdown("---")
+
+    st.markdown("""We will now ask you again what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate).
+
+We will calculate the mean responses provided by the other participants the second time they were asked and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
+
+    st.markdown(f"**What rating do you think other UK participants gave for: {norm['title']}?**")
     st.markdown("Other respondents' average appropriateness rating:")
-    val = labeled_slider(" ", key=f"group_final_slider_p8_{i}", default=50)
+    val = likert_7(key=f"likert_p8_{i}")
 
     if st.button("Continue"):
+        if val is None:
+            st.warning("Please select a response before continuing.")
+            st.stop()
         st.session_state.opinions_others_final[norm['title']] = val
         if i + 1 < total:
             st.session_state.phase8_index += 1

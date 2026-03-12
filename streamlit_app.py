@@ -183,13 +183,13 @@ def scroll_to_top_on_phase_entry():
 # CHANGE 2: Labels now include text descriptors alongside numbers
 # ============================================================================
 LIKERT_LABELS = [
-    "1\nExtremely\ninappropriate",
-    "2\nVery\ninappropriate",
-    "3\nSomewhat\ninappropriate",
+    "1\nExtremely inappropriate",
+    "2\nVery inappropriate",
+    "3\nSomewhat inappropriate",
     "4\nNeither",
-    "5\nSomewhat\nappropriate",
-    "6\nVery\nappropriate",
-    "7\nExtremely\nappropriate",
+    "5\nSomewhat appropriate",
+    "6\nVery appropriate",
+    "7\nExtremely appropriate",
 ]
 
 def likert_7(key):

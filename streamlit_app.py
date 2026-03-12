@@ -600,8 +600,11 @@ elif st.session_state.phase == 5:
     # PULSANTE DI FINE CONVERSAZIONE                                      #
     # ------------------------------------------------------------------ #
     user_msg_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
-    if user_msg_count >= 2:
-        if st.button("End Discussion & Continue"):
+
+    st.markdown("---")
+    st.markdown("*Scroll down and proceed to the next section.*")
+    if st.button("End Discussion & Continue"):
+        if user_msg_count >= 2:
             st.session_state.phase = 6
             st.rerun()
 

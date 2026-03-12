@@ -19,7 +19,7 @@ st.set_page_config(
     page_title="Online Discussion Study",
     page_icon="💬",
     layout="wide",
-    initial_sidebar_ebar="collapsed"
+    initial_sidebar_state="collapsed"
 )
 
 # ============================================================================

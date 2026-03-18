@@ -840,18 +840,16 @@ elif st.session_state.phase == 9.2:
             label_visibility="collapsed",
             placeholder="Write your thoughts here…",
         )
-        if st.button("Continue →"):
-                        text = st.session_state.get("writing_text_input_B", "").strip()
-                        if len(text.split()) < 50:
-                            st.session_state["writing_B_too_short"] = True
-                        else:
-                            st.session_state["writing_B_too_short"] = False
-                            st.session_state.writing_text_final = text
-                            st.session_state.phase = 9.3
-                            st.rerun()
 
-        if st.session_state.get("writing_B_too_short"):
-                        st.warning("Please write at least a few sentences before continuing.")
+        text_A = st.session_state.get("writing_text_input_A", "").strip()
+        if len(text_A) >= 144:
+            if st.button("Continue →"):
+                st.session_state.writing_text_final = text_A
+                st.session_state.phase = 9.3
+                st.rerun()
+        else:
+            chars_left = 144 - len(text_A)
+            st.caption(f"✏️ Write at least {chars_left} more character(s) to continue.")
 
     # ── GROUP B — two columns: writing left, AI chat right ──────────────────
     else:
@@ -892,14 +890,16 @@ elif st.session_state.phase == 9.2:
                 label_visibility="collapsed",
                 placeholder="Write your thoughts here…",
             )
-            if st.button("Continue →"):
-                text = st.session_state.get("writing_text_input_B", "").strip()
-                if len(text.split()) < 50:
-                    st.warning("Please write at least a few sentences before continuing.")
-                    st.stop()
-                st.session_state.writing_text_final = text
-                st.session_state.phase = 9.3
-                st.rerun()
+
+            text_B = st.session_state.get("writing_text_input_B", "").strip()
+            if len(text_B) >= 144:
+                if st.button("Continue →"):
+                    st.session_state.writing_text_final = text_B
+                    st.session_state.phase = 9.3
+                    st.rerun()
+            else:
+                chars_left = 144 - len(text_B)
+                st.caption(f"✏️ Write at least {chars_left} more character(s) to continue.")
 
         with col_chat:
             st.markdown("## 🤖 AI Writing Assistant")

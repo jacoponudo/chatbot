@@ -841,13 +841,17 @@ elif st.session_state.phase == 9.2:
             placeholder="Write your thoughts here…",
         )
         if st.button("Continue →"):
-            text = st.session_state.get("writing_text_input_A", "").strip()
-            if len(text.split()) < 10:
-                st.warning("Please write at least a few sentences before continuing.")
-                st.stop()
-            st.session_state.writing_text_final = text
-            st.session_state.phase = 9.3
-            st.rerun()
+                        text = st.session_state.get("writing_text_input_B", "").strip()
+                        if len(text.split()) < 50:
+                            st.session_state["writing_B_too_short"] = True
+                        else:
+                            st.session_state["writing_B_too_short"] = False
+                            st.session_state.writing_text_final = text
+                            st.session_state.phase = 9.3
+                            st.rerun()
+
+        if st.session_state.get("writing_B_too_short"):
+                        st.warning("Please write at least a few sentences before continuing.")
 
     # ── GROUP B — two columns: writing left, AI chat right ──────────────────
     else:

@@ -25,19 +25,19 @@ st.set_page_config(
 FIXED_NORM = "not telling someone they have gained weight"
 
 LIKERT_LABELS_RECOGN = [
-    "1\nNot at all",
+    "Not at all",
     "2", "3", "4", "5", "6",
-    "7\nCompletely",
+    "Completely",
 ]
 
 LIKERT_LABELS_APPROP = [
-    "Extremely\ninappropriate",
-    "Very\ninappropriate",
-    "Somewhat\ninappropriate",
-    "Neither",
-    "Somewhat\nappropriate",
-    "Very\nappropriate",
-    "Extremely\nappropriate",
+    "1\nExtremely\ninappropriate",
+    "2\nVery\ninappropriate",
+    "3\nSomewhat\ninappropriate",
+    "4\nNeither",
+    "5\nSomewhat\nappropriate",
+    "6\nVery\nappropriate",
+    "7\nExtremely\nappropriate",
 ]
 
 # ============================================================================
@@ -68,7 +68,7 @@ def save_to_writing_sheet(row):
 def get_gemini_model() -> GenerativeModel:
     if "gemini_model" not in st.session_state:
         vertex_creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
+            st.secrets["gcp_vertex_account"],
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
         vertexai.init(

@@ -54,22 +54,6 @@ def get_sheet():
         )
     return st.session_state.gsheet
 
-def get_writing_sheet():
-    if "writing_gsheet" not in st.session_state:
-        creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=[
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive",
-            ],
-        )
-        st.session_state.writing_gsheet = (
-            gspread.authorize(creds)
-            .open_by_url(st.secrets["writing_sheet_url"])
-            .sheet1
-        )
-    return st.session_state.writing_gsheet
-
 def check_prolific_id_exists(prolific_id):
     values = get_sheet().col_values(1)
     return prolific_id.lower() in [v.lower() for v in values[1:]]
@@ -89,9 +73,6 @@ def get_least_used_combination():
 
 def save_to_google_sheets(row):
     get_sheet().append_row(row, value_input_option="RAW")
-
-def save_to_writing_sheet(row):
-    get_writing_sheet().append_row(row, value_input_option="RAW")
 
 # ============================================================================
 # VERTEX AI / GEMINI CLIENT — lazy
@@ -199,6 +180,7 @@ def scroll_to_top_on_phase_entry():
 
 # ============================================================================
 # LIKERT-7 HELPER
+# CHANGE 2: Labels now include text descriptors alongside numbers
 # ============================================================================
 LIKERT_LABELS = [
     "1\nExtremely inappropriate",
@@ -211,6 +193,11 @@ LIKERT_LABELS = [
 ]
 
 def likert_7(key):
+    """
+    Renders a 7-point Likert scale as clickable buttons with descriptive labels.
+    Returns the selected integer (1-7) or None if nothing selected yet.
+    Stores selection in st.session_state[key].
+    """
     selected = st.session_state.get(key)
     cols = st.columns(7)
     for j, label in enumerate(LIKERT_LABELS):
@@ -249,13 +236,6 @@ if "session_initialized" not in st.session_state:
         "gemini_chat":                  None,
         "system_prompt_cache":          None,
         "last_scrolled_phase":          None,
-        # ── Writing experiment ───────────────────────────────────────────────
-        "writing_group":                None,   # "A" = solo scrittura, "B" = LLM-assistito
-        "writing_text_final":           "",     # testo finale consegnato
-        "writing_llm_output":           "",     # ultimo output LLM grezzo (solo gruppo B)
-        "writing_llm_exchanges":        [],     # log completo scambi LLM (solo gruppo B)
-        "writing_post_recogn":          None,   # Likert 1-7: "mi riconosco nel testo"
-        "writing_post_appropriate":     None,   # Likert 1-7: appropriatezza norma post-scrittura
     })
 
 # ============================================================================
@@ -392,6 +372,7 @@ elif st.session_state.phase == 1:
 
 # ============================================================================
 # PHASE 2 — INITIAL APPROPRIATENESS RATINGS (one norm per screen)
+# CHANGE 1: Norm presented as "the action of: '<norm title>'"
 # ============================================================================
 elif st.session_state.phase == 2:
     if "prompt_key" not in st.session_state:
@@ -438,6 +419,7 @@ Your task in each case is simply to rate, on a 7-point scale from 1 (completely 
 
 # ============================================================================
 # PHASE 3 — EXPECTED OTHERS' RATINGS (one norm per screen)
+# CHANGE 1: Norm presented as "the action of: '<norm title>'"
 # ============================================================================
 elif st.session_state.phase == 3:
     if "phase3_index" not in st.session_state:
@@ -507,6 +489,9 @@ elif st.session_state.phase == 5:
     )
     st.session_state.system_prompt_cache = system_prompt
 
+    # ------------------------------------------------------------------ #
+    # GREETING                                                             #
+    # ------------------------------------------------------------------ #
     if not st.session_state.greeting_sent:
         if st.session_state.get("precomputed_greeting"):
             st.session_state.gemini_chat = st.session_state.precomputed_chat
@@ -529,6 +514,9 @@ elif st.session_state.phase == 5:
         st.session_state.greeting_sent = True
         st.rerun()
 
+    # ------------------------------------------------------------------ #
+    # RENDER HISTORY                                                       #
+    # ------------------------------------------------------------------ #
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
@@ -536,6 +524,9 @@ elif st.session_state.phase == 5:
     assistant_count = sum(1 for m in st.session_state.messages if m["role"] == "assistant")
     round_count     = max(0, assistant_count - 1)
 
+    # ------------------------------------------------------------------ #
+    # USER INPUT                                                           #
+    # ------------------------------------------------------------------ #
     if user_input := st.chat_input("Type your response here"):
         st.session_state.pending_user_message = {
             "role":      "user",
@@ -544,6 +535,9 @@ elif st.session_state.phase == 5:
         }
         st.rerun()
 
+    # ------------------------------------------------------------------ #
+    # PROCESS USER MESSAGE AND GENERATE RESPONSE                          #
+    # ------------------------------------------------------------------ #
     if st.session_state.pending_user_message:
         user_msg = st.session_state.pending_user_message
         st.session_state.messages.append(user_msg)
@@ -589,6 +583,9 @@ elif st.session_state.phase == 5:
             })
         st.rerun()
 
+    # ------------------------------------------------------------------ #
+    # END CONVERSATION BUTTON                                              #
+    # ------------------------------------------------------------------ #
     user_msg_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
 
     if st.button("End Discussion & Continue"):
@@ -613,6 +610,7 @@ elif st.session_state.phase == 6:
 
 # ============================================================================
 # PHASE 7 — FINAL APPROPRIATENESS RATINGS (one norm per screen)
+# CHANGE 1: Norm presented as "the action of: '<norm title>'"
 # ============================================================================
 elif st.session_state.phase == 7:
     if "phase7_index" not in st.session_state:
@@ -645,6 +643,9 @@ elif st.session_state.phase == 7:
 
 # ============================================================================
 # PHASE 8 — FINAL EXPECTED OTHERS' RATINGS
+# CHANGE 3: Only ask about the norm that was discussed with the AI,
+#           with framing that other participants also had an AI conversation
+# CHANGE 1: Norm presented as "the action of: '<norm title>'"
 # ============================================================================
 elif st.session_state.phase == 8:
     if "opinions_others_final" not in st.session_state:
@@ -673,161 +674,12 @@ We will calculate the mean responses provided by the other participants and comp
             st.warning("Please select a response before continuing.")
             st.stop()
         st.session_state.opinions_others_final[title] = val
-        st.session_state.phase = 81          # → writing experiment
-        st.rerun()
-
-# ============================================================================
-# PHASE 81 — WRITING EXPERIMENT (task di scrittura sulla norma fissa)
-# ============================================================================
-elif st.session_state.phase == 81:
-
-    FIXED_NORM = "not telling someone they have gained weight"
-
-    # Assegnazione randomizzata al gruppo (eseguita una sola volta)
-    if st.session_state.writing_group is None:
-        st.session_state.writing_group = random.choice(["A", "B"])
-
-    group = st.session_state.writing_group
-
-    st.markdown("---")
-    st.markdown("## One more question before we finish")
-    st.markdown(
-        "We are interested in how people express their personal view "
-        "on a specific social norm in their own words."
-    )
-    st.markdown("---")
-
-    st.markdown(
-        "**Please write around 5 lines expressing your personal perception "
-        "of the following social norm:**"
-    )
-    st.markdown(f"> *\"{FIXED_NORM}\"*")
-    st.markdown(
-        "There is no right or wrong answer. Write freely: you can describe "
-        "what you think about this norm, share a personal experience, or argue a position."
-    )
-
-    # ── GRUPPO A — solo area di testo ────────────────────────────────────────
-    if group == "A":
-        st.text_area(
-            "Your answer (approx. 5 lines):",
-            height=200,
-            key="writing_text_input_A",
-        )
-
-        if st.button("Continue"):
-            text = st.session_state.get("writing_text_input_A", "").strip()
-            if len(text.split()) < 10:
-                st.warning("Please write at least a few sentences before continuing.")
-                st.stop()
-            st.session_state.writing_text_final = text
-            st.session_state.phase = 82
-            st.rerun()
-
-    # ── GRUPPO B — assistente LLM + area di testo ────────────────────────────
-    else:
-        st.markdown(
-            "You also have access to an AI assistant. "
-            "You can use it however you like: to get ideas, to improve what you have written, "
-            "or to generate the text directly. The choice is yours."
-        )
-
-        # Chat LLM dedicata — inizializzata una sola volta
-        if "writing_chat" not in st.session_state:
-            model        = get_gemini_model()
-            writing_chat = model.start_chat()
-            writing_chat.send_message(
-                "You are a helpful writing assistant. "
-                "The user is participating in a research study and needs to write "
-                "approximately 5 lines expressing their personal view on the following "
-                f"social norm: \"{FIXED_NORM}\". "
-                "Help them think about the topic, suggest ideas, or draft text if asked. "
-                "Be concise and neutral. Do not take strong political positions. "
-                "Respond in the same language the user writes in."
-            )
-            st.session_state.writing_chat = writing_chat
-
-        # Render storico scambi
-        if st.session_state.writing_llm_exchanges:
-            st.markdown("**AI Assistant:**")
-            for msg in st.session_state.writing_llm_exchanges:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-
-        # Input verso LLM
-        llm_input = st.chat_input("Ask the AI for help (optional)…")
-        if llm_input:
-            st.session_state.writing_llm_exchanges.append(
-                {"role": "user", "content": llm_input}
-            )
-            with st.chat_message("user"):
-                st.markdown(llm_input)
-
-            with st.chat_message("assistant"):
-                stream = st.session_state.writing_chat.send_message(llm_input, stream=True)
-                reply  = st.write_stream(chunk.text for chunk in stream)
-
-            st.session_state.writing_llm_exchanges.append(
-                {"role": "assistant", "content": reply}
-            )
-            st.session_state.writing_llm_output = reply
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("**Your final text** *(write or paste here — this is what we will save)*:")
-        st.text_area(
-            "Your answer (approx. 5 lines):",
-            height=200,
-            key="writing_text_input_B",
-            label_visibility="collapsed",
-        )
-
-        if st.button("Continue"):
-            text = st.session_state.get("writing_text_input_B", "").strip()
-            if len(text.split()) < 10:
-                st.warning("Please write at least a few sentences before continuing.")
-                st.stop()
-            st.session_state.writing_text_final = text
-            st.session_state.phase = 82
-            st.rerun()
-
-# ============================================================================
-# PHASE 82 — POST-WRITING QUESTIONNAIRE
-# ============================================================================
-elif st.session_state.phase == 82:
-
-    FIXED_NORM = "not telling someone they have gained weight"
-
-    st.markdown("## A few questions about what you just wrote")
-    st.markdown("Please answer based on the text you wrote in the previous section.")
-    st.markdown("---")
-
-    st.markdown("**To what extent does the text you wrote reflect your personal opinion?**")
-    st.markdown("*1 = Not at all — 7 = Completely*")
-    recogn = likert_7(key="writing_post_recogn")
-
-    st.markdown("---")
-
-    st.markdown(
-        f"**After writing, how appropriate or inappropriate do you consider "
-        f"the action of: \"{FIXED_NORM}\"?**"
-    )
-    st.markdown("*1 = Extremely inappropriate — 7 = Extremely appropriate*")
-    appropriate = likert_7(key="writing_post_appropriate")
-
-    st.markdown("---")
-
-    if st.button("Continue"):
-        if recogn is None or appropriate is None:
-            st.warning("Please answer both questions before continuing.")
-            st.stop()
-        st.session_state.writing_post_recogn      = recogn
-        st.session_state.writing_post_appropriate = appropriate
         st.session_state.phase = 9
         st.rerun()
 
 # ============================================================================
-# PHASE 9 — CONVERSATION PERCEPTION
+# PHASE 9 — CONVERSATION PERCEPTION  (was Phase 10)
+# CHANGE 4: Swapped order — Conversation Perception now comes before Tightness
 # ============================================================================
 elif st.session_state.phase == 9:
     involvement_items = [
@@ -884,7 +736,8 @@ elif st.session_state.phase == 9:
         st.rerun()
 
 # ============================================================================
-# PHASE 10 — TIGHTNESS SCALE
+# PHASE 10 — TIGHTNESS SCALE  (was Phase 9)
+# CHANGE 4: Swapped order — Tightness now comes after Conversation Perception
 # ============================================================================
 elif st.session_state.phase == 10:
     st.markdown("""The following statements refer to the country in which you currently live, as a whole. Indicate whether you agree or disagree with the statements using the following scale. Note that the statements sometimes refer to "social norms," which are generally unwritten standards of behavior.""")
@@ -1055,7 +908,7 @@ We hope that our research can contribute to a better understanding of how to mak
         st.rerun()
 
 # ============================================================================
-# PHASE 14 — FINAL COMMENTS + SAVE TO GOOGLE SHEETS
+# PHASE 14 — FINAL COMMENTS  +  SINGLE SAVE TO GOOGLE SHEETS
 # ============================================================================
 elif st.session_state.phase == 14 and not st.session_state.data_saved:
     st.markdown("You may optionally leave any comments about the study in the box below.")
@@ -1069,7 +922,6 @@ elif st.session_state.phase == 14 and not st.session_state.data_saved:
             for m in st.session_state.messages if m["role"] == "user"
         )
 
-        # ── Riga principale (sheet originale) ───────────────────────────────
         row = [
             st.session_state.prolific_id,
             st.session_state.prompt_key,
@@ -1110,28 +962,6 @@ elif st.session_state.phase == 14 and not st.session_state.data_saved:
         except Exception as e:
             st.error(f"There was an error saving your data: {e}. Please contact the researchers before closing this page.")
             st.stop()
-
-        # ── Riga writing experiment (sheet separato) ─────────────────────────
-        writing_row = [
-            st.session_state.prolific_id,                                        # A: Prolific ID
-            st.session_state.get("writing_group", ""),                           # B: Gruppo (A o B)
-            "not telling someone they have gained weight",                        # C: Norma fissa
-            st.session_state.get("writing_text_final", ""),                      # D: Testo finale
-            st.session_state.get("writing_llm_output", ""),                      # E: Ultimo output LLM
-            json.dumps(
-                st.session_state.get("writing_llm_exchanges", []),
-                ensure_ascii=False
-            ),                                                                   # F: Log completo scambi LLM
-            str(len(st.session_state.get("writing_llm_exchanges", [])) // 2),   # G: N query inviate
-            str(st.session_state.get("writing_post_recogn", "")),               # H: Riconoscimento (Likert 1-7)
-            str(st.session_state.get("writing_post_appropriate", "")),          # I: Appropriatezza post (Likert 1-7)
-            datetime.now().isoformat(),                                          # J: Timestamp
-        ]
-
-        try:
-            save_to_writing_sheet(writing_row)
-        except Exception as e:
-            st.warning(f"Writing experiment data could not be saved to the secondary sheet: {e}")
 
         st.session_state.data_saved = True
         st.session_state.phase = 15

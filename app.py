@@ -86,8 +86,8 @@ def get_writing_sheet():
         )
         st.session_state.writing_gsheet = (
             gspread.authorize(creds)
-            .open_by_url(st.secrets["writing_sheet_url"])
-            .sheet1
+            .open_by_url(st.secrets["google_sheet_url"])
+            .get_worksheet(1)   # second sheet (index 1) of the same spreadsheet
         )
     return st.session_state.writing_gsheet
 

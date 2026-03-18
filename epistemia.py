@@ -31,13 +31,13 @@ LIKERT_LABELS_RECOGN = [
 ]
 
 LIKERT_LABELS_APPROP = [
-    "1\nExtremely\ninappropriate",
-    "2\nVery\ninappropriate",
-    "3\nSomewhat\ninappropriate",
-    "4\nNeither",
-    "5\nSomewhat\nappropriate",
-    "6\nVery\nappropriate",
-    "7\nExtremely\nappropriate",
+    "Extremely\ninappropriate",
+    "Very\ninappropriate",
+    "Somewhat\ninappropriate",
+    "Neither",
+    "Somewhat\nappropriate",
+    "Very\nappropriate",
+    "Extremely\nappropriate",
 ]
 
 # ============================================================================
@@ -55,7 +55,7 @@ def get_writing_sheet():
         st.session_state.writing_gsheet = (
             gspread.authorize(creds)
             .open_by_url(st.secrets["writing_sheet_url"])
-            .sheet2
+            .sheet1
         )
     return st.session_state.writing_gsheet
 
@@ -68,7 +68,7 @@ def save_to_writing_sheet(row):
 def get_gemini_model() -> GenerativeModel:
     if "gemini_model" not in st.session_state:
         vertex_creds = Credentials.from_service_account_info(
-            st.secrets["gcp_vertex_account"],
+            st.secrets["gcp_service_account"],
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
         vertexai.init(

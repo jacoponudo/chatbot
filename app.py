@@ -820,6 +820,32 @@ elif st.session_state.phase == 9.1:
 elif st.session_state.phase == 9.2:
     group = st.session_state.writing_group
 
+    # ── SNAPSHOT TIMER — ogni 10 secondi salva il testo corrente ─────────────
+    if "writing_phase_start" not in st.session_state:
+        st.session_state.writing_phase_start = time.time()
+    if "writing_last_snapshot" not in st.session_state:
+        st.session_state.writing_last_snapshot = time.time()
+    if "writing_snapshots" not in st.session_state:
+        st.session_state.writing_snapshots = []
+
+    now = time.time()
+    if now - st.session_state.writing_last_snapshot >= 10:
+        text_key     = "writing_text_input_A" if group == "A" else "writing_text_input_B"
+        current_text = st.session_state.get(text_key, "").strip()
+        st.session_state.writing_snapshots.append({
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_s": round(now - st.session_state.writing_phase_start, 1),
+            "text":      current_text,
+            "trigger":   "timer",
+        })
+        st.session_state.writing_last_snapshot = now
+
+    # Auto-rerun ogni 10 secondi per triggerare lo snapshot
+    st.components.v1.html(
+        "<script>setTimeout(() => window.parent.location.reload(), 10000);</script>",
+        height=0,
+    )
+
     # ── GROUP A — full-width text area (no AI) ───────────────────────────────
     if group == "A":
         st.markdown("## Your Writing")
@@ -844,7 +870,15 @@ elif st.session_state.phase == 9.2:
         text_A = st.session_state.get("writing_text_input_A", "").strip()
         if len(text_A) >= 144:
             if st.button("Continue →"):
-                st.session_state.writing_text_final = text_A
+                st.session_state.writing_snapshots.append({
+                    "timestamp": datetime.now().isoformat(),
+                    "elapsed_s": round(time.time() - st.session_state.writing_phase_start, 1),
+                    "text":      text_A,
+                    "trigger":   "submit",
+                })
+                st.session_state.writing_text_final = json.dumps(
+                    st.session_state.writing_snapshots, ensure_ascii=False
+                )
                 st.session_state.phase = 9.3
                 st.rerun()
         else:
@@ -894,7 +928,15 @@ elif st.session_state.phase == 9.2:
             text_B = st.session_state.get("writing_text_input_B", "").strip()
             if len(text_B) >= 144:
                 if st.button("Continue →"):
-                    st.session_state.writing_text_final = text_B
+                    st.session_state.writing_snapshots.append({
+                        "timestamp": datetime.now().isoformat(),
+                        "elapsed_s": round(time.time() - st.session_state.writing_phase_start, 1),
+                        "text":      text_B,
+                        "trigger":   "submit",
+                    })
+                    st.session_state.writing_text_final = json.dumps(
+                        st.session_state.writing_snapshots, ensure_ascii=False
+                    )
                     st.session_state.phase = 9.3
                     st.rerun()
             else:

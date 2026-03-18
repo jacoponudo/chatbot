@@ -1,12 +1,13 @@
 import streamlit as st
-import json
-import random
+import gspread
+from google.oauth2.service_account import Credentials
 from datetime import datetime
+import json
+import time
+import random
 
 import vertexai
 from vertexai.generative_models import GenerativeModel
-from google.oauth2.service_account import Credentials
-import gspread
 
 # ============================================================================
 # PAGE CONFIG
@@ -54,7 +55,7 @@ def get_writing_sheet():
         st.session_state.writing_gsheet = (
             gspread.authorize(creds)
             .open_by_url(st.secrets["writing_sheet_url"])
-            .sheet1
+            .sheet2
         )
     return st.session_state.writing_gsheet
 
@@ -62,7 +63,7 @@ def save_to_writing_sheet(row):
     get_writing_sheet().append_row(row, value_input_option="RAW")
 
 # ============================================================================
-# VERTEX AI / GEMINI CLIENT
+# VERTEX AI / GEMINI CLIENT — same pattern as main app
 # ============================================================================
 def get_gemini_model() -> GenerativeModel:
     if "gemini_model" not in st.session_state:
@@ -100,16 +101,18 @@ def likert_7(key, labels):
 # ============================================================================
 if "writing_initialized" not in st.session_state:
     st.session_state.update({
-        "writing_initialized":      True,
-        "writing_phase":            0,      # 0=prolific_id, 1=intro, 2=writing, 3=post-q, 4=done
-        "writing_group":            None,   # assigned after prolific id entry
-        "prolific_id":              "",
-        "writing_text_final":       "",
-        "writing_llm_output":       "",
-        "writing_llm_exchanges":    [],
-        "writing_post_recogn":      None,
-        "writing_post_appropriate": None,
-        "writing_data_saved":       False,
+        "writing_initialized":        True,
+        "writing_phase":              0,
+        "writing_group":              None,
+        "prolific_id":                "",
+        "writing_text_final":         "",
+        "writing_llm_output":         "",
+        "writing_llm_exchanges":      [],
+        "writing_post_recogn":        None,
+        "writing_post_appropriate":   None,
+        "writing_data_saved":         False,
+        "writing_pending_msg":        None,
+        "writing_chat_initialized":   False,
     })
 
 # ============================================================================
@@ -146,12 +149,8 @@ elif st.session_state.writing_phase == 1:
     st.markdown("---")
 
     st.markdown(
-        "In this part of the study, we are interested in how people express "
-        "their personal views on everyday social norms in their own words."
-    )
-    st.markdown(
-        "You will be asked to write **around 5 lines** expressing your personal "
-        "perception of a specific social norm."
+        "**Please write around 5 lines expressing your personal perception "
+        "of a specific social norm.**"
     )
     st.markdown(
         "There is **no right or wrong answer**. Write freely — you can describe "
@@ -167,13 +166,6 @@ elif st.session_state.writing_phase == 1:
         unsafe_allow_html=True,
     )
     st.markdown("---")
-
-    if st.session_state.writing_group == "B":
-        st.info(
-            "💡 On the next screen you will also have access to an **AI writing assistant** "
-            "on the right side of the page. You can use it however you like — to brainstorm, "
-            "get feedback, or draft text. The choice is entirely yours."
-        )
 
     if st.button("Start writing →"):
         st.session_state.writing_phase = 2
@@ -217,12 +209,13 @@ elif st.session_state.writing_phase == 2:
             st.session_state.writing_phase = 3
             st.rerun()
 
-    # ── GROUP B — two columns: writing on left, AI chat on right ────────────
+    # ── GROUP B — two columns: writing left, AI chat right ──────────────────
     else:
-        # Init dedicated writing chat — only once
-        if "writing_chat" not in st.session_state:
+        # Init writing chat session — only once
+        if not st.session_state.writing_chat_initialized:
             model        = get_gemini_model()
             writing_chat = model.start_chat()
+            # Send system context as first message (same pattern as main app)
             writing_chat.send_message(
                 "You are a helpful writing assistant. "
                 "The user is participating in a research study and must write "
@@ -232,7 +225,8 @@ elif st.session_state.writing_phase == 2:
                 "Be concise and neutral. Do not take strong political positions. "
                 "Respond in the same language the user writes in."
             )
-            st.session_state.writing_chat = writing_chat
+            st.session_state.writing_chat         = writing_chat
+            st.session_state.writing_chat_initialized = True
 
         col_write, col_chat = st.columns([3, 2], gap="large")
 
@@ -268,40 +262,38 @@ elif st.session_state.writing_phase == 2:
         # ── Right: AI chat ───────────────────────────────────────────────────
         with col_chat:
             st.markdown("## 🤖 AI Writing Assistant")
-            st.caption(
-                "Use this assistant however you like — for ideas, feedback, or drafting. "
-                "It's completely optional."
-            )
+            st.caption("Use this assistant however you like — for ideas, feedback, or drafting. It's completely optional.")
 
-            # Scrollable chat history
-            chat_container = st.container(height=400)
-            with chat_container:
-                if not st.session_state.writing_llm_exchanges:
-                    st.markdown(
-                        "<div style='color:#aaa;font-size:.9rem;padding:8px 0;'>"
-                        "Ask me anything about this topic…</div>",
-                        unsafe_allow_html=True,
-                    )
-                for msg in st.session_state.writing_llm_exchanges:
-                    with st.chat_message(msg["role"]):
-                        st.markdown(msg["content"])
+            # Render past exchanges
+            for msg in st.session_state.writing_llm_exchanges:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
-            # Chat input below the container
-            llm_input = st.chat_input("Ask the AI for help…", key="writing_chat_input")
-            if llm_input:
+            # Process pending message (same pattern as main app)
+            if st.session_state.writing_pending_msg:
+                pending = st.session_state.writing_pending_msg
                 st.session_state.writing_llm_exchanges.append(
-                    {"role": "user", "content": llm_input}
+                    {"role": "user", "content": pending}
                 )
-                with st.spinner("Thinking…"):
-                    stream = st.session_state.writing_chat.send_message(
-                        llm_input, stream=True
-                    )
-                    reply = "".join(chunk.text for chunk in stream)
+                with st.chat_message("user"):
+                    st.markdown(pending)
+                st.session_state.writing_pending_msg = None
+
+                chat = st.session_state.writing_chat
+                with st.chat_message("assistant"):
+                    stream = chat.send_message(pending, stream=True)
+                    reply  = st.write_stream(chunk.text for chunk in stream)
 
                 st.session_state.writing_llm_exchanges.append(
                     {"role": "assistant", "content": reply}
                 )
                 st.session_state.writing_llm_output = reply
+                st.rerun()
+
+            # Chat input
+            llm_input = st.chat_input("Ask the AI for help…", key="writing_chat_input")
+            if llm_input:
+                st.session_state.writing_pending_msg = llm_input
                 st.rerun()
 
 # ============================================================================
@@ -338,19 +330,19 @@ elif st.session_state.writing_phase == 3:
         # ── Save to Google Sheets ────────────────────────────────────────────
         if not st.session_state.writing_data_saved:
             writing_row = [
-                st.session_state.prolific_id,                                       # A
-                st.session_state.get("writing_group", ""),                          # B
-                FIXED_NORM,                                                         # C
-                st.session_state.get("writing_text_final", ""),                     # D
-                st.session_state.get("writing_llm_output", ""),                     # E
+                st.session_state.prolific_id,
+                st.session_state.get("writing_group", ""),
+                FIXED_NORM,
+                st.session_state.get("writing_text_final", ""),
+                st.session_state.get("writing_llm_output", ""),
                 json.dumps(
                     st.session_state.get("writing_llm_exchanges", []),
                     ensure_ascii=False,
-                ),                                                                  # F
-                str(len(st.session_state.get("writing_llm_exchanges", [])) // 2),  # G
-                str(st.session_state.get("writing_post_recogn", "")),              # H
-                str(st.session_state.get("writing_post_appropriate", "")),         # I
-                datetime.now().isoformat(),                                         # J
+                ),
+                str(len(st.session_state.get("writing_llm_exchanges", [])) // 2),
+                str(st.session_state.get("writing_post_recogn", "")),
+                str(st.session_state.get("writing_post_appropriate", "")),
+                datetime.now().isoformat(),
             ]
             try:
                 save_to_writing_sheet(writing_row)

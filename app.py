@@ -831,7 +831,7 @@ elif st.session_state.phase == 9.1:
 elif st.session_state.phase == 9.2:
 
     # ── Autorefresh every 10 s so the save fires even without user events ──
-    st_autorefresh(interval=1_000, key="writing_autorefresh")
+    st_autorefresh(interval=10_000, key="writing_autorefresh")
 
     group = st.session_state.writing_group
 

@@ -1,6 +1,5 @@
 import streamlit as st
 import json
-import time
 import random
 from datetime import datetime
 
@@ -26,26 +25,22 @@ FIXED_NORM = "not telling someone they have gained weight"
 
 LIKERT_LABELS_RECOGN = [
     "1\nNot at all",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
+    "2", "3", "4", "5", "6",
     "7\nCompletely",
 ]
 
 LIKERT_LABELS_APPROP = [
-    "1\nExtremely inappropriate",
-    "2\nVery inappropriate",
-    "3\nSomewhat inappropriate",
+    "1\nExtremely\ninappropriate",
+    "2\nVery\ninappropriate",
+    "3\nSomewhat\ninappropriate",
     "4\nNeither",
-    "5\nSomewhat appropriate",
-    "6\nVery appropriate",
-    "7\nExtremely appropriate",
+    "5\nSomewhat\nappropriate",
+    "6\nVery\nappropriate",
+    "7\nExtremely\nappropriate",
 ]
 
 # ============================================================================
-# GOOGLE SHEETS — saving writing data
+# GOOGLE SHEETS
 # ============================================================================
 def get_writing_sheet():
     if "writing_gsheet" not in st.session_state:
@@ -67,7 +62,7 @@ def save_to_writing_sheet(row):
     get_writing_sheet().append_row(row, value_input_option="RAW")
 
 # ============================================================================
-# VERTEX AI / GEMINI CLIENT — lazy init
+# VERTEX AI / GEMINI CLIENT
 # ============================================================================
 def get_gemini_model() -> GenerativeModel:
     if "gemini_model" not in st.session_state:
@@ -105,76 +100,132 @@ def likert_7(key, labels):
 # ============================================================================
 if "writing_initialized" not in st.session_state:
     st.session_state.update({
-        "writing_initialized":    True,
-        "writing_phase":          81,           # start at phase 81
-        "writing_group":          random.choice(["A", "B"]),
-        "writing_text_final":     "",
-        "writing_llm_output":     "",
-        "writing_llm_exchanges":  [],
-        "writing_post_recogn":    None,
+        "writing_initialized":      True,
+        "writing_phase":            0,      # 0=prolific_id, 1=intro, 2=writing, 3=post-q, 4=done
+        "writing_group":            None,   # assigned after prolific id entry
+        "prolific_id":              "",
+        "writing_text_final":       "",
+        "writing_llm_output":       "",
+        "writing_llm_exchanges":    [],
+        "writing_post_recogn":      None,
         "writing_post_appropriate": None,
-        "writing_data_saved":     False,
-        # For standalone use — replace with actual prolific_id if embedded
-        "prolific_id":            st.query_params.get("PROLIFIC_PID", "test_user"),
+        "writing_data_saved":       False,
     })
 
 # ============================================================================
-# PHASE 81 — WRITING TASK
+# PHASE 0 — PROLIFIC ID + GROUP ASSIGNMENT
 # ============================================================================
-if st.session_state.writing_phase == 81:
+if st.session_state.writing_phase == 0:
+
+    st.markdown("## Welcome")
+    st.markdown("Please enter your Prolific ID to begin.")
+
+    prolific_id_input = st.text_input(
+        "Prolific ID:",
+        value=st.session_state.prolific_id,
+        placeholder="Enter your Prolific ID here…",
+        key="prolific_id_input",
+    )
+
+    if st.button("Continue"):
+        pid = prolific_id_input.strip()
+        if not pid:
+            st.warning("Please enter your Prolific ID before continuing.")
+            st.stop()
+        st.session_state.prolific_id   = pid
+        st.session_state.writing_group = random.choice(["A", "B"])
+        st.session_state.writing_phase = 1
+        st.rerun()
+
+# ============================================================================
+# PHASE 1 — TASK INTRODUCTION
+# ============================================================================
+elif st.session_state.writing_phase == 1:
+
+    st.markdown("## Writing Task — Instructions")
+    st.markdown("---")
+
+    st.markdown(
+        "In this part of the study, we are interested in how people express "
+        "their personal views on everyday social norms in their own words."
+    )
+    st.markdown(
+        "You will be asked to write **around 5 lines** expressing your personal "
+        "perception of a specific social norm."
+    )
+    st.markdown(
+        "There is **no right or wrong answer**. Write freely — you can describe "
+        "what you think about the norm, share a personal experience, or argue a position."
+    )
+
+    st.markdown("---")
+    st.markdown("**The norm you will be writing about is:**")
+    st.markdown(
+        f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
+        f"padding:14px 18px;border-radius:4px;font-size:1.1rem;font-style:italic;'>"
+        f"\"{FIXED_NORM}\"</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("---")
+
+    if st.session_state.writing_group == "B":
+        st.info(
+            "💡 On the next screen you will also have access to an **AI writing assistant** "
+            "on the right side of the page. You can use it however you like — to brainstorm, "
+            "get feedback, or draft text. The choice is entirely yours."
+        )
+
+    if st.button("Start writing →"):
+        st.session_state.writing_phase = 2
+        st.rerun()
+
+# ============================================================================
+# PHASE 2 — WRITING SCREEN
+# ============================================================================
+elif st.session_state.writing_phase == 2:
 
     group = st.session_state.writing_group
 
-    st.markdown("---")
-    st.markdown("## One more question before we finish")
-    st.markdown(
-        "We are interested in how people express their personal view "
-        "on a specific social norm in their own words."
-    )
-    st.markdown("---")
-
-    st.markdown(
-        "**Please write around 5 lines expressing your personal perception "
-        "of the following social norm:**"
-    )
-    st.markdown(f"> *\"{FIXED_NORM}\"*")
-    st.markdown(
-        "There is no right or wrong answer. Write freely: you can describe "
-        "what you think about this norm, share a personal experience, or argue a position."
-    )
-
-    # ── GROUP A — text area only ─────────────────────────────────────────────
+    # ── GROUP A — full-width text area ───────────────────────────────────────
     if group == "A":
-        st.text_area(
-            "Your answer (approx. 5 lines):",
-            height=200,
-            key="writing_text_input_A",
+        st.markdown("## Your Writing")
+        st.markdown(
+            "**Please write around 5 lines expressing your personal perception "
+            "of the following norm:**"
+        )
+        st.markdown(
+            f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
+            f"padding:12px 16px;border-radius:4px;font-style:italic;margin-bottom:16px;'>"
+            f"\"{FIXED_NORM}\"</div>",
+            unsafe_allow_html=True,
         )
 
-        if st.button("Continue"):
+        st.text_area(
+            "Your answer:",
+            height=260,
+            key="writing_text_input_A",
+            label_visibility="collapsed",
+            placeholder="Write your thoughts here…",
+        )
+
+        if st.button("Continue →"):
             text = st.session_state.get("writing_text_input_A", "").strip()
             if len(text.split()) < 10:
                 st.warning("Please write at least a few sentences before continuing.")
                 st.stop()
             st.session_state.writing_text_final = text
-            st.session_state.writing_phase = 82
+            st.session_state.writing_phase = 3
             st.rerun()
 
-    # ── GROUP B — LLM assistant + text area ──────────────────────────────────
+    # ── GROUP B — two columns: writing on left, AI chat on right ────────────
     else:
-        st.markdown(
-            "You also have access to an AI assistant. "
-            "You can use it however you like: to get ideas, to improve what you have written, "
-            "or to generate the text directly. The choice is yours."
-        )
-
         # Init dedicated writing chat — only once
         if "writing_chat" not in st.session_state:
             model        = get_gemini_model()
             writing_chat = model.start_chat()
             writing_chat.send_message(
                 "You are a helpful writing assistant. "
-                "The user is participating in a research study and needs to write "
+                "The user is participating in a research study and must write "
                 "approximately 5 lines expressing their personal view on the following "
                 f"social norm: \"{FIXED_NORM}\". "
                 "Help them think about the topic, suggest ideas, or draft text if asked. "
@@ -183,54 +234,80 @@ if st.session_state.writing_phase == 81:
             )
             st.session_state.writing_chat = writing_chat
 
-        # Render past exchanges
-        if st.session_state.writing_llm_exchanges:
-            st.markdown("**AI Assistant:**")
-            for msg in st.session_state.writing_llm_exchanges:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
+        col_write, col_chat = st.columns([3, 2], gap="large")
 
-        # LLM input
-        llm_input = st.chat_input("Ask the AI for help (optional)…")
-        if llm_input:
-            st.session_state.writing_llm_exchanges.append(
-                {"role": "user", "content": llm_input}
+        # ── Left: writing area ───────────────────────────────────────────────
+        with col_write:
+            st.markdown("## Your Writing")
+            st.markdown(
+                "**Please write around 5 lines expressing your personal perception "
+                "of the following norm:**"
             )
-            with st.chat_message("user"):
-                st.markdown(llm_input)
-
-            with st.chat_message("assistant"):
-                stream = st.session_state.writing_chat.send_message(llm_input, stream=True)
-                reply  = st.write_stream(chunk.text for chunk in stream)
-
-            st.session_state.writing_llm_exchanges.append(
-                {"role": "assistant", "content": reply}
+            st.markdown(
+                f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
+                f"padding:12px 16px;border-radius:4px;font-style:italic;margin-bottom:16px;'>"
+                f"\"{FIXED_NORM}\"</div>",
+                unsafe_allow_html=True,
             )
-            st.session_state.writing_llm_output = reply
-            st.rerun()
+            st.text_area(
+                "Your answer:",
+                height=300,
+                key="writing_text_input_B",
+                label_visibility="collapsed",
+                placeholder="Write your thoughts here…",
+            )
+            if st.button("Continue →"):
+                text = st.session_state.get("writing_text_input_B", "").strip()
+                if len(text.split()) < 10:
+                    st.warning("Please write at least a few sentences before continuing.")
+                    st.stop()
+                st.session_state.writing_text_final = text
+                st.session_state.writing_phase = 3
+                st.rerun()
 
-        st.markdown("---")
-        st.markdown("**Your final text** *(write or paste here — this is what we will save)*:")
-        st.text_area(
-            "Your answer (approx. 5 lines):",
-            height=200,
-            key="writing_text_input_B",
-            label_visibility="collapsed",
-        )
+        # ── Right: AI chat ───────────────────────────────────────────────────
+        with col_chat:
+            st.markdown("## 🤖 AI Writing Assistant")
+            st.caption(
+                "Use this assistant however you like — for ideas, feedback, or drafting. "
+                "It's completely optional."
+            )
 
-        if st.button("Continue"):
-            text = st.session_state.get("writing_text_input_B", "").strip()
-            if len(text.split()) < 10:
-                st.warning("Please write at least a few sentences before continuing.")
-                st.stop()
-            st.session_state.writing_text_final = text
-            st.session_state.writing_phase = 82
-            st.rerun()
+            # Scrollable chat history
+            chat_container = st.container(height=400)
+            with chat_container:
+                if not st.session_state.writing_llm_exchanges:
+                    st.markdown(
+                        "<div style='color:#aaa;font-size:.9rem;padding:8px 0;'>"
+                        "Ask me anything about this topic…</div>",
+                        unsafe_allow_html=True,
+                    )
+                for msg in st.session_state.writing_llm_exchanges:
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+
+            # Chat input below the container
+            llm_input = st.chat_input("Ask the AI for help…", key="writing_chat_input")
+            if llm_input:
+                st.session_state.writing_llm_exchanges.append(
+                    {"role": "user", "content": llm_input}
+                )
+                with st.spinner("Thinking…"):
+                    stream = st.session_state.writing_chat.send_message(
+                        llm_input, stream=True
+                    )
+                    reply = "".join(chunk.text for chunk in stream)
+
+                st.session_state.writing_llm_exchanges.append(
+                    {"role": "assistant", "content": reply}
+                )
+                st.session_state.writing_llm_output = reply
+                st.rerun()
 
 # ============================================================================
-# PHASE 82 — POST-WRITING QUESTIONNAIRE
+# PHASE 3 — POST-WRITING QUESTIONNAIRE
 # ============================================================================
-elif st.session_state.writing_phase == 82:
+elif st.session_state.writing_phase == 3:
 
     st.markdown("## A few questions about what you just wrote")
     st.markdown("Please answer based on the text you wrote in the previous section.")
@@ -251,7 +328,7 @@ elif st.session_state.writing_phase == 82:
 
     st.markdown("---")
 
-    if st.button("Continue"):
+    if st.button("Continue →"):
         if recogn is None or appropriate is None:
             st.warning("Please answer both questions before continuing.")
             st.stop()
@@ -261,35 +338,36 @@ elif st.session_state.writing_phase == 82:
         # ── Save to Google Sheets ────────────────────────────────────────────
         if not st.session_state.writing_data_saved:
             writing_row = [
-                st.session_state.prolific_id,                                        # A: Prolific ID
-                st.session_state.get("writing_group", ""),                           # B: Group (A or B)
-                FIXED_NORM,                                                          # C: Fixed norm
-                st.session_state.get("writing_text_final", ""),                      # D: Final text
-                st.session_state.get("writing_llm_output", ""),                      # E: Last LLM output
+                st.session_state.prolific_id,                                       # A
+                st.session_state.get("writing_group", ""),                          # B
+                FIXED_NORM,                                                         # C
+                st.session_state.get("writing_text_final", ""),                     # D
+                st.session_state.get("writing_llm_output", ""),                     # E
                 json.dumps(
                     st.session_state.get("writing_llm_exchanges", []),
-                    ensure_ascii=False
-                ),                                                                   # F: Full LLM exchange log
-                str(len(st.session_state.get("writing_llm_exchanges", [])) // 2),   # G: N queries sent
-                str(st.session_state.get("writing_post_recogn", "")),               # H: Recognition (Likert 1-7)
-                str(st.session_state.get("writing_post_appropriate", "")),          # I: Post-appropriateness (Likert 1-7)
-                datetime.now().isoformat(),                                          # J: Timestamp
+                    ensure_ascii=False,
+                ),                                                                  # F
+                str(len(st.session_state.get("writing_llm_exchanges", [])) // 2),  # G
+                str(st.session_state.get("writing_post_recogn", "")),              # H
+                str(st.session_state.get("writing_post_appropriate", "")),         # I
+                datetime.now().isoformat(),                                         # J
             ]
             try:
                 save_to_writing_sheet(writing_row)
                 st.session_state.writing_data_saved = True
             except Exception as e:
-                st.warning(f"Writing experiment data could not be saved: {e}")
+                st.warning(f"Data could not be saved: {e}")
 
-        st.session_state.writing_phase = 83
+        st.session_state.writing_phase = 4
         st.rerun()
 
 # ============================================================================
-# PHASE 83 — DONE (hand back to main flow or show completion)
+# PHASE 4 — DONE
 # ============================================================================
-elif st.session_state.writing_phase >= 83:
+elif st.session_state.writing_phase >= 4:
     st.markdown("## Thank you!")
-    st.markdown("Your responses have been recorded. You may now proceed to the next section of the study.")
-    # If embedded in a larger study, replace the block above with:
+    st.markdown("Your responses have been recorded successfully.")
+    st.markdown("You may now proceed to the next section of the study.")
+    # If embedded in the main study, replace the lines above with:
     #   st.session_state.phase = 9
     #   st.rerun()

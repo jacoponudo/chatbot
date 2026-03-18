@@ -41,18 +41,24 @@ NORMS   = load_json("norms.json")
 WRITING_FIXED_NORM = "not telling someone they have gained weight"
 
 LIKERT_LABELS_RECOGN = [
-    "Not at all", "2", "3", "4", "5", "6", "Completely",
-]
-LIKERT_LABELS_APPROP_WRITING = [
-    "1\nExtremely\ninappropriate",
-    "2\nVery\ninappropriate",
-    "3\nSomewhat\ninappropriate",
-    "4\nNeither",
-    "5\nSomewhat\nappropriate",
-    "6\nVery\nappropriate",
-    "7\nExtremely\nappropriate",
+    "Not at all",
+    "Slightly",
+    "Somewhat",
+    "Moderately",
+    "Very",
+    "Mostly",
+    "Completely",
 ]
 
+LIKERT_LABELS_APPROP_WRITING = [
+    "Extremely\ninappropriate",
+    "Very\ninappropriate",
+    "Somewhat\ninappropriate",
+    "Neither",
+    "Somewhat\nappropriate",
+    "Very\nappropriate",
+    "Extremely\nappropriate",
+]
 # ============================================================================
 # GOOGLE SHEETS — lazy (main sheet)
 # ============================================================================
@@ -884,7 +890,7 @@ elif st.session_state.phase == 9.2:
             )
             if st.button("Continue →"):
                 text = st.session_state.get("writing_text_input_B", "").strip()
-                if len(text.split()) < 10:
+                if len(text.split()) < 50:
                     st.warning("Please write at least a few sentences before continuing.")
                     st.stop()
                 st.session_state.writing_text_final = text

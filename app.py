@@ -12,6 +12,8 @@ import vertexai
 from vertexai.generative_models import GenerativeModel, ChatSession
 import threading
 
+from streamlit_autorefresh import st_autorefresh
+
 # ============================================================================
 # PAGE CONFIG
 # ============================================================================
@@ -59,6 +61,7 @@ LIKERT_LABELS_APPROP_WRITING = [
     "Very\nappropriate",
     "Extremely\nappropriate",
 ]
+
 # ============================================================================
 # GOOGLE SHEETS — lazy (main sheet)
 # ============================================================================
@@ -93,7 +96,7 @@ def get_writing_sheet():
         st.session_state.writing_gsheet = (
             gspread.authorize(creds)
             .open_by_url(st.secrets["google_sheet_url"])
-            .get_worksheet(1)   # second sheet (index 1) of the same spreadsheet
+            .get_worksheet(1)
         )
     return st.session_state.writing_gsheet
 
@@ -259,27 +262,20 @@ def likert_7(key, labels=None):
     return st.session_state.get(key)
 
 # ============================================================================
-# ── AUTOSAVE HELPER ─────────────────────────────────────────────────────────
-# Called on every render of phase 9.2 (which happens on every user interaction
-# including keystrokes in the textarea and chat messages).
-# Saves a timestamped snapshot into writing_autosave_log only when:
-#   • at least 10 seconds have passed since the last save, AND
-#   • the text has actually changed since the last save.
+# AUTOSAVE HELPER
+# ── Saves a timestamped snapshot of current_text into writing_autosave_log
+#    whenever the text has changed (no minimum time gate — every render
+#    of phase 9.2 that finds new text will record it, but the autorefresh
+#    interval controls how often that happens at rest).
 # writing_autosave_log = { "2024-01-15T10:34:20": "snapshot text", ... }
-# writing_text_final   = JSON-serialised writing_autosave_log
-#                        (stored in col 34 of both sheets — same column as before)
+# writing_text_final   = JSON-serialised writing_autosave_log → col 34
 # ============================================================================
 def _autosave_text(current_text: str) -> None:
-    now            = time.time()
-    last_save_time = st.session_state.get("writing_last_save_time", 0)
     last_saved_txt = st.session_state.get("writing_last_saved_text", None)
-
-    if now - last_save_time >= 10 and current_text != last_saved_txt:
+    if current_text != last_saved_txt:
         timestamp_key = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
         st.session_state.writing_autosave_log[timestamp_key] = current_text
-        st.session_state.writing_last_save_time  = now
         st.session_state.writing_last_saved_text = current_text
-        # Keep writing_text_final in sync — this is what gets written to col 34
         st.session_state.writing_text_final = json.dumps(
             st.session_state.writing_autosave_log, ensure_ascii=False
         )
@@ -313,8 +309,8 @@ if "session_initialized" not in st.session_state:
         "writing_group":                random.choice(["A", "B"]),
         "writing_text_final":           "",   # JSON of writing_autosave_log
         "writing_autosave_log":         {},   # { timestamp: text_snapshot }
-        "writing_last_save_time":       0,
         "writing_last_saved_text":      None,
+        "writing_llm_streaming":        False, # True while LLM is generating
         "writing_llm_output":           "",
         "writing_llm_exchanges":        [],
         "writing_post_recogn":          None,
@@ -845,13 +841,18 @@ elif st.session_state.phase == 9.1:
 
 # ============================================================================
 # PHASE 9.2 — WRITING TASK: WRITING SCREEN
-# ── Autosave: _autosave_text() is called on every render of this phase.
-#   Streamlit re-renders on every user interaction (keystroke in textarea,
-#   chat message sent/received, button click), so the 10-second gate inside
-#   _autosave_text() is sufficient to capture snapshots without any external
-#   autorefresh component that would break the LLM streaming.
+# ── st_autorefresh fires every 5 s, but ONLY when the LLM is not streaming.
+#    _autosave_text() records a snapshot whenever the text has changed since
+#    the last saved version — so each 5 s tick that finds new text → new entry.
 # ============================================================================
 elif st.session_state.phase == 9.2:
+
+    # ── Autorefresh every 5 s, paused while LLM is streaming ─────────────
+    # writing_llm_streaming is set to True just before st.write_stream and
+    # back to False immediately after, so the refresh won't interrupt it.
+    if not st.session_state.get("writing_llm_streaming", False):
+        st_autorefresh(interval=5_000, key="writing_autorefresh")
+
     group = st.session_state.writing_group
 
     # ── GROUP A — full-width text area (no AI) ───────────────────────────────
@@ -875,7 +876,7 @@ elif st.session_state.phase == 9.2:
             placeholder="Write your thoughts here…",
         )
 
-        # ── autosave on every render ──────────────────────────────────────
+        # autosave on every render (every 5 s tick + every user interaction)
         _autosave_text(st.session_state.get("writing_text_input_A", "").strip())
 
         if st.button("Continue →"):
@@ -884,8 +885,8 @@ elif st.session_state.phase == 9.2:
                 st.session_state["writing_A_too_short"] = True
             else:
                 st.session_state["writing_A_too_short"] = False
-                # force a final snapshot regardless of the 10-second gate
-                st.session_state.writing_last_save_time = 0
+                # force final snapshot even if text unchanged since last save
+                st.session_state.writing_last_saved_text = None
                 _autosave_text(text)
                 st.session_state.phase = 9.3
                 st.rerun()
@@ -933,7 +934,7 @@ elif st.session_state.phase == 9.2:
                 placeholder="Write your thoughts here…",
             )
 
-            # ── autosave on every render ──────────────────────────────────
+            # autosave on every render (every 5 s tick + every user interaction)
             _autosave_text(st.session_state.get("writing_text_input_B", "").strip())
 
             if st.button("Continue →"):
@@ -941,8 +942,8 @@ elif st.session_state.phase == 9.2:
                 if len(text.split()) < 50:
                     st.warning("Please write at least a few sentences before continuing.")
                     st.stop()
-                # force a final snapshot regardless of the 10-second gate
-                st.session_state.writing_last_save_time = 0
+                # force final snapshot even if text unchanged since last save
+                st.session_state.writing_last_saved_text = None
                 _autosave_text(text)
                 st.session_state.phase = 9.3
                 st.rerun()
@@ -966,8 +967,11 @@ elif st.session_state.phase == 9.2:
 
                 chat = st.session_state.writing_chat
                 with st.chat_message("assistant"):
+                    # ── pause autorefresh during streaming ────────────────
+                    st.session_state.writing_llm_streaming = True
                     stream = chat.send_message(pending, stream=True)
                     reply  = st.write_stream(chunk.text for chunk in stream)
+                    st.session_state.writing_llm_streaming = False
 
                 st.session_state.writing_llm_exchanges.append(
                     {"role": "assistant", "content": reply}

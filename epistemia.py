@@ -21,6 +21,7 @@ st.set_page_config(
 # CONSTANTS
 # ============================================================================
 WRITING_FIXED_NORM = "not telling someone they have gained weight"
+WORD_MIN = 50
 
 LIKERT_LABELS_RECOGN = [
     "Not at all", "Slightly", "Somewhat", "Moderately", "Very", "Mostly", "Completely",
@@ -29,9 +30,15 @@ LIKERT_LABELS_APPROP_WRITING = [
     "Extremely\ninappropriate", "Very\ninappropriate", "Somewhat\ninappropriate",
     "Neither", "Somewhat\nappropriate", "Very\nappropriate", "Extremely\nappropriate",
 ]
+# Phase 9 labels — text instead of numbers
 LIKERT_LABELS_DEFAULT = [
-    "1\nExtremely inappropriate", "2\nVery inappropriate", "3\nSomewhat inappropriate",
-    "4\nNeither", "5\nSomewhat appropriate", "6\nVery appropriate", "7\nExtremely appropriate",
+    "Extremely\ninappropriate",
+    "Very\ninappropriate",
+    "Somewhat\ninappropriate",
+    "Neither",
+    "Somewhat\nappropriate",
+    "Very\nappropriate",
+    "Extremely\nappropriate",
 ]
 
 INVOLVEMENT_ITEMS = [
@@ -69,19 +76,23 @@ if "session_initialized" not in st.session_state:
         "writing_text_final":       "",
         "writing_keystroke_log":    {},   # {ISO timestamp: full text snapshot}
         "writing_llm_output":       "",
-        "writing_llm_exchanges":    [],
+        "writing_llm_exchanges":    [],   # [{role, content, timestamp}]
         "writing_post_recogn":      None,
         "writing_post_appropriate": None,
         "writing_pending_msg":      None,
         "writing_chat_initialized": False,
         "gemini_model":             None,
         "writing_chat":             None,
+        # timing
+        "writing_phase_start":      None,
+        "writing_phase_end":        None,
     })
 
 # ============================================================================
 # HELPERS — Likert scales
 # ============================================================================
 def likert_7(key, labels=None):
+    """7-point scale rendered as clickable text buttons."""
     if labels is None:
         labels = LIKERT_LABELS_DEFAULT
     selected = st.session_state.get(key)
@@ -97,102 +108,120 @@ def likert_7(key, labels=None):
     return st.session_state.get(key)
 
 def render_7pt_item(label, key):
+    """Single Likert item with text labels (no numbers)."""
     st.markdown(f"**{label}**")
     cols     = st.columns(7)
     selected = st.session_state.get(key)
+    scale_labels = [
+        "Totally\ndisagree", "Mostly\ndisagree", "Somewhat\ndisagree",
+        "Neither", "Somewhat\nagree", "Mostly\nagree", "Totally\nagree"
+    ]
     for j in range(1, 8):
         with cols[j - 1]:
-            if st.button(str(j), key=f"{key}_{j}", use_container_width=True,
+            lbl = scale_labels[j - 1]
+            if st.button(lbl, key=f"{key}_{j}", use_container_width=True,
                          type="primary" if selected == j else "secondary"):
                 st.session_state[key] = j
                 st.rerun()
     st.markdown("")
 
 # ============================================================================
-# HELPERS — JS-based 1-second sampler
+# HELPERS — Autosave JS
 #
-# Injects a <script> tag directly into the Streamlit page (not an iframe).
-# The script runs a setInterval every 1000ms, reads the textarea value,
-# and if changed writes {timestamp: text} into a hidden <div id="ks-store">.
-#
-# On submit, a second snippet reads ks-store and writes the JSON into the
-# Streamlit text_input with key "ks_log_hidden" by simulating a native input
-# event — which makes Streamlit pick up the new value on the next rerun.
+# Every 1 s JS samples the textarea → writes {ISO_ts: text} into a hidden
+# input (autosave_json_sink).  A flip-flop hidden input (autosave_trigger)
+# forces a Streamlit rerun each second so Python can merge the log.
+# On each rerun, merge_autosave_into_log() accumulates new entries.
 # ============================================================================
 
-def inject_sampler_js(textarea_key: str):
-    """
-    Inject JS that samples the textarea every second.
-    The ks-store div accumulates {ISO_ts: text} entries.
-    Call once after rendering the textarea.
-    """
+AUTOSAVE_SINK_LABEL    = "autosave_json_sink"
+AUTOSAVE_TRIGGER_LABEL = "autosave_trigger"
+
+def inject_autosave_js():
     st.markdown(f"""
-<div id="ks-store" style="display:none">{{{{ }}</div>
 <script>
 (function() {{
-    // avoid double-init on reruns
-    if (window._ksSamplerRunning) return;
-    window._ksSamplerRunning = true;
-    window._ksLog = {{}};
+    // Preserve the log across reruns — never reset it
+    window._ksLog = window._ksLog || {{}};
+
+    // Clear any stacked interval from previous reruns
+    if (window._autosaveIntervalId != null) {{
+        clearInterval(window._autosaveIntervalId);
+        window._autosaveIntervalId = null;
+    }}
+
     let lastText = null;
+    let triggerFlip = false;
+
+    function nativeSet(el, val) {{
+        const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value').set;
+        setter.call(el, val);
+        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    }}
+
+    function findInput(label) {{
+        return document.querySelector('input[aria-label="' + label + '"]');
+    }}
 
     function findTextarea() {{
-        // Streamlit renders textareas inside the stTextArea component
         const tas = document.querySelectorAll('textarea');
-        // return the first non-disabled one (our writing area)
-        for (const ta of tas) {{
-            if (!ta.disabled) return ta;
-        }}
+        for (const ta of tas) {{ if (!ta.disabled) return ta; }}
         return null;
     }}
 
-    function sample() {{
+    function tick() {{
         const ta = findTextarea();
-        if (!ta) return;
-        const val = ta.value;
-        if (val === lastText || val.trim() === '') return;
-        lastText = val;
-        const ts = new Date().toISOString();
-        window._ksLog[ts] = val;
-        // also store in the DOM so Python can read it at submit
-        const store = document.getElementById('ks-store');
-        if (store) store.textContent = JSON.stringify(window._ksLog);
+        if (ta) {{
+            const val = ta.value;
+            if (val !== lastText && val.trim() !== '') {{
+                lastText = val;
+                const ts = new Date().toISOString();
+                window._ksLog[ts] = val;
+                const sink = findInput('{AUTOSAVE_SINK_LABEL}');
+                if (sink) nativeSet(sink, JSON.stringify(window._ksLog));
+            }}
+        }}
+        // Flip trigger to force Streamlit rerun
+        const trigger = findInput('{AUTOSAVE_TRIGGER_LABEL}');
+        if (trigger) {{
+            triggerFlip = !triggerFlip;
+            nativeSet(trigger, triggerFlip ? '1' : '0');
+        }}
     }}
 
-    setInterval(sample, 1000);
+    tick();
+    window._autosaveIntervalId = setInterval(tick, 1000);
 }})();
 </script>
 """, unsafe_allow_html=True)
 
 
-def inject_submit_js(hidden_input_label: str):
-    """
-    Inject JS that on form submit reads _ksLog and pushes it into the
-    hidden Streamlit text_input so Python receives it on the next rerun.
-    hidden_input_label must match the label of the st.text_input used as sink.
-    """
-    st.markdown(f"""
-<script>
-(function() {{
-    // find the hidden text input by its aria-label
-    function findHiddenInput() {{
-        return document.querySelector('input[aria-label="{hidden_input_label}"]');
-    }}
-
-    // expose globally so the Continue button onclick can call it
-    window._ksFlush = function() {{
-        const inp = findHiddenInput();
-        if (!inp) return;
-        const log = JSON.stringify(window._ksLog || {{}});
-        // set native value so React picks it up
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype, 'value').set;
-        nativeInputValueSetter.call(inp, log);
-        inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
-    }};
-}})();
-</script>
+def render_autosave_inputs():
+    st.markdown("""
+<style>
+div[data-testid='stTextInput']:has(input[aria-label='autosave_json_sink']),
+div[data-testid='stTextInput']:has(input[aria-label='autosave_trigger'])
+{ position:absolute; opacity:0; pointer-events:none; height:0; overflow:hidden; }
+</style>
 """, unsafe_allow_html=True)
+    st.text_input(AUTOSAVE_SINK_LABEL,    key="autosave_json_sink",   label_visibility="hidden")
+    st.text_input(AUTOSAVE_TRIGGER_LABEL, key="autosave_trigger_val", label_visibility="hidden")
+
+
+def merge_autosave_into_log():
+    raw = st.session_state.get("autosave_json_sink", "")
+    if not raw:
+        return
+    try:
+        incoming = json.loads(raw)
+    except Exception:
+        return
+    log = st.session_state.writing_keystroke_log
+    for ts, text in incoming.items():
+        if ts not in log:
+            log[ts] = text
+    st.session_state.writing_keystroke_log = log
 
 # ============================================================================
 # HELPERS — Gemini
@@ -216,7 +245,7 @@ def get_gemini_model() -> GenerativeModel:
 # ============================================================================
 if st.session_state.phase == 9:
     st.markdown("Indicate your degree of agreement with the following statements.")
-    st.markdown("*Scale: 1 = Totally disagree — 7 = Totally agree*")
+    st.markdown("*Scale: Totally disagree → Totally agree*")
 
     def _render_group(items, header):
         st.markdown(f"#### {header}")
@@ -262,6 +291,8 @@ elif st.session_state.phase == 9.1:
     st.markdown(f"*(Debug: assigned to Group **{st.session_state.writing_group}**)*")
 
     if st.button("Start writing →"):
+        # Record phase start time
+        st.session_state.writing_phase_start = datetime.utcnow().isoformat() + "Z"
         st.session_state.phase = 9.2
         st.rerun()
 
@@ -269,12 +300,14 @@ elif st.session_state.phase == 9.1:
 # PHASE 9.2 — Writing Task Screen
 # ============================================================================
 elif st.session_state.phase == 9.2:
+
+    # Merge any new autosave data on every rerun (includes 1-s triggered reruns)
+    merge_autosave_into_log()
+
     group = st.session_state.writing_group
 
-    HIDDEN_LABEL = "ks_log_sink"
-
-    def _writing_ui(textarea_key: str, height: int):
-        """Norm box + JS-sampled textarea + hidden sink + continue button."""
+    def _writing_ui(textarea_key: str, height: int, show_word_counter: bool = False):
+        """Norm box + textarea + autosave + optional word counter + continue button."""
         st.markdown(
             "**Please write around 5 lines expressing your personal perception of the following norm:**"
         )
@@ -293,71 +326,81 @@ elif st.session_state.phase == 9.2:
             placeholder="Write your thoughts here…",
         )
 
-        # inject sampler after textarea
-        inject_sampler_js(textarea_key)
+        render_autosave_inputs()
+        inject_autosave_js()
 
-        # hidden text_input that JS will write the log JSON into
-        st.markdown(
-            "<style>div[data-testid='stTextInput']:has(input[aria-label='ks_log_sink']) "
-            "{ position:absolute; opacity:0; pointer-events:none; height:0; }</style>",
-            unsafe_allow_html=True,
-        )
-        st.text_input(HIDDEN_LABEL, key="ks_log_hidden", label_visibility="hidden")
+        # ── Word counter + conditional Continue (Group B) ────────────────────
+        current_text  = st.session_state.get(textarea_key, "") or ""
+        word_count    = len(current_text.split()) if current_text.strip() else 0
+        enough_words  = word_count >= WORD_MIN
 
-        inject_submit_js(HIDDEN_LABEL)
+        if show_word_counter:
+            # Progress bar and word count
+            progress = min(word_count / WORD_MIN, 1.0)
+            st.progress(progress)
 
-        # Button with onclick that flushes JS log into hidden input first
-        st.markdown(
-            """<script>
-            (function() {
-                // wrap the Continue button to call _ksFlush before Streamlit processes click
-                function patchBtn() {
-                    const btns = document.querySelectorAll('button[kind="secondary"], button[kind="primary"]');
-                    btns.forEach(btn => {
-                        if (btn.textContent.trim().startsWith("Continue") && !btn._ksPatchted) {
-                            btn._ksPatchted = true;
-                            btn.addEventListener("click", function() {
-                                if (window._ksFlush) window._ksFlush();
-                            }, true);
-                        }
-                    });
-                }
-                // try immediately and after a short delay
-                patchBtn();
-                setTimeout(patchBtn, 500);
-                setTimeout(patchBtn, 1500);
-            })();
-            </script>""",
-            unsafe_allow_html=True,
-        )
+            if enough_words:
+                st.success(
+                    f"✅ **{word_count} words** — minimum reached! You can continue.",
+                    icon=None,
+                )
+            else:
+                remaining = WORD_MIN - word_count
+                st.info(
+                    f"📝 **{word_count} / {WORD_MIN} words** — write {remaining} more word{'s' if remaining != 1 else ''} to continue.",
+                )
 
-        if st.button("Continue →", key=f"btn_{textarea_key}"):
-            text = st.session_state.get(textarea_key, "").strip()
-            if len(text.split()) < 50:
-                st.warning("Please write at least 50 words before continuing.")
-                st.stop()
+            # Show live autosave snapshot count
+            n_snap = len(st.session_state.writing_keystroke_log)
+            if n_snap > 0:
+                st.caption(f"💾 {n_snap} snapshot{'s' if n_snap != 1 else ''} autosaved")
 
-            # read the log from the hidden input that JS populated
-            raw_log = st.session_state.get("ks_log_hidden", "{}")
-            try:
-                ks_log = json.loads(raw_log) if raw_log else {}
-            except Exception:
-                ks_log = {}
+            # Continue only enabled when enough words
+            if enough_words:
+                if st.button("Continue →", key=f"btn_{textarea_key}"):
+                    _save_and_advance(textarea_key, current_text)
+            else:
+                st.button("Continue →", key=f"btn_{textarea_key}", disabled=True)
 
-            # fallback: if JS log is empty, at least save the final text
-            if not ks_log:
-                ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-                ks_log[ts] = text
+        else:
+            # Group A — original behaviour
+            n_snap = len(st.session_state.writing_keystroke_log)
+            if n_snap > 0:
+                st.caption(f"💾 {n_snap} snapshot{'s' if n_snap != 1 else ''} autosaved")
 
-            st.session_state.writing_text_final    = text
-            st.session_state.writing_keystroke_log = ks_log
-            st.session_state.phase = 9.3
-            st.rerun()
+            if st.button("Continue →", key=f"btn_{textarea_key}"):
+                if word_count < WORD_MIN:
+                    st.warning(f"Please write at least {WORD_MIN} words before continuing.")
+                    st.stop()
+                _save_and_advance(textarea_key, current_text)
+
+    def _save_and_advance(textarea_key: str, text: str):
+        """Finalise log and advance to phase 9.3."""
+        merge_autosave_into_log()
+
+        # Record phase end time
+        st.session_state.writing_phase_end = datetime.utcnow().isoformat() + "Z"
+
+        # Add explicit start/end markers to the log
+        log = st.session_state.writing_keystroke_log
+        if st.session_state.writing_phase_start:
+            log["__phase_start__"] = st.session_state.writing_phase_start
+        log["__phase_end__"] = st.session_state.writing_phase_end
+
+        # Fallback: ensure at least one snapshot
+        if not any(k for k in log if not k.startswith("__")):
+            ts = datetime.utcnow().isoformat() + "Z"
+            log[ts] = text
+
+        st.session_state.writing_text_final    = text
+        st.session_state.writing_keystroke_log = log
+        st.session_state.phase = 9.3
+        st.rerun()
 
     # ── GROUP A ──────────────────────────────────────────────────────────────
     if group == "A":
         st.markdown("## Your Writing")
-        _writing_ui("writing_text_A", height=260)
+        _writing_ui("writing_text_A", height=260, show_word_counter=False)
 
     # ── GROUP B ──────────────────────────────────────────────────────────────
     else:
@@ -379,7 +422,7 @@ elif st.session_state.phase == 9.2:
 
         with col_write:
             st.markdown("## Your Writing")
-            _writing_ui("writing_text_B", height=300)
+            _writing_ui("writing_text_B", height=300, show_word_counter=True)
 
         with col_chat:
             st.markdown("## 🤖 AI Writing Assistant")
@@ -388,20 +431,35 @@ elif st.session_state.phase == 9.2:
             for msg in st.session_state.writing_llm_exchanges:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
+                    # Show timestamp below each message
+                    if "timestamp" in msg:
+                        st.caption(f"🕐 {msg['timestamp']}")
 
             if st.session_state.writing_pending_msg:
-                pending = st.session_state.writing_pending_msg
-                st.session_state.writing_llm_exchanges.append({"role": "user", "content": pending})
+                pending    = st.session_state.writing_pending_msg
+                ts_sent    = datetime.utcnow().isoformat() + "Z"
+                st.session_state.writing_llm_exchanges.append({
+                    "role":      "user",
+                    "content":   pending,
+                    "timestamp": ts_sent,
+                })
                 with st.chat_message("user"):
                     st.markdown(pending)
+                    st.caption(f"🕐 {ts_sent}")
                 st.session_state.writing_pending_msg = None
 
                 chat = st.session_state.writing_chat
                 with st.chat_message("assistant"):
-                    stream = chat.send_message(pending, stream=True)
-                    reply  = st.write_stream(chunk.text for chunk in stream)
+                    stream     = chat.send_message(pending, stream=True)
+                    reply      = st.write_stream(chunk.text for chunk in stream)
+                    ts_reply   = datetime.utcnow().isoformat() + "Z"
+                    st.caption(f"🕐 {ts_reply}")
 
-                st.session_state.writing_llm_exchanges.append({"role": "assistant", "content": reply})
+                st.session_state.writing_llm_exchanges.append({
+                    "role":      "assistant",
+                    "content":   reply,
+                    "timestamp": ts_reply,
+                })
                 st.session_state.writing_llm_output = reply
                 st.rerun()
 
@@ -419,7 +477,7 @@ elif st.session_state.phase == 9.3:
     st.markdown("---")
 
     st.markdown("**To what extent does the text you wrote reflect your personal opinion?**")
-    st.markdown("*1 = Not at all — 7 = Completely*")
+    st.markdown("*Not at all → Completely*")
     recogn = likert_7(key="writing_post_recogn", labels=LIKERT_LABELS_RECOGN)
 
     st.markdown("---")
@@ -428,7 +486,7 @@ elif st.session_state.phase == 9.3:
         f"**After writing, how appropriate or inappropriate do you consider "
         f"the action of: \"{WRITING_FIXED_NORM}\"?**"
     )
-    st.markdown("*1 = Extremely inappropriate — 7 = Extremely appropriate*")
+    st.markdown("*Extremely inappropriate → Extremely appropriate*")
     appropriate = likert_7(key="writing_post_appropriate", labels=LIKERT_LABELS_APPROP_WRITING)
 
     st.markdown("---")
@@ -469,18 +527,40 @@ elif st.session_state.phase == 99:
     st.markdown("## Phase 9.2 — Writing Task")
     st.write(f"**Norm:** {WRITING_FIXED_NORM}")
     st.write(f"**Group:** {st.session_state.writing_group}")
+
+    # Timing
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        st.write(f"⏱ **Phase start:** {st.session_state.writing_phase_start or '—'}")
+    with col_t2:
+        st.write(f"⏱ **Phase end:** {st.session_state.writing_phase_end or '—'}")
+
+    # Duration
+    if st.session_state.writing_phase_start and st.session_state.writing_phase_end:
+        try:
+            fmt = "%Y-%m-%dT%H:%M:%S.%fZ"
+            t0  = datetime.strptime(st.session_state.writing_phase_start, fmt)
+            t1  = datetime.strptime(st.session_state.writing_phase_end,   fmt)
+            dur = int((t1 - t0).total_seconds())
+            st.write(f"⏱ **Duration:** {dur} seconds ({dur // 60}m {dur % 60}s)")
+        except Exception:
+            pass
+
     st.markdown("**Final written text:**")
     st.text_area("", value=st.session_state.writing_text_final, height=160,
                  disabled=True, label_visibility="collapsed")
     final_words = len(st.session_state.writing_text_final.split()) if st.session_state.writing_text_final else 0
     st.write(f"Word count: **{final_words}**")
 
-    n_entries = len(st.session_state.writing_keystroke_log)
-    st.markdown(f"**Change log** — {n_entries} snapshots (recorded on each focus-out / pause):")
+    # Keystroke log — filter out meta keys for display
+    real_log = {k: v for k, v in st.session_state.writing_keystroke_log.items()
+                if not k.startswith("__")}
+    n_entries = len(real_log)
+    st.markdown(f"**Autosave log** — {n_entries} 1-second snapshots:")
     st.json(st.session_state.writing_keystroke_log)
 
     if st.session_state.writing_group == "B":
-        st.markdown("**AI chat exchanges:**")
+        st.markdown("**AI chat exchanges (with timestamps):**")
         st.write(f"Number of messages: **{len(st.session_state.writing_llm_exchanges)}**")
         st.json(st.session_state.writing_llm_exchanges)
 
@@ -498,8 +578,10 @@ elif st.session_state.phase == 99:
         "writing_group":           st.session_state.writing_group,
         "writing_norm":            WRITING_FIXED_NORM,
         "writing_text_final":      st.session_state.writing_text_final,
+        "writing_phase_start":     st.session_state.writing_phase_start,
+        "writing_phase_end":       st.session_state.writing_phase_end,
         "writing_keystroke_log":   st.session_state.writing_keystroke_log,
-        "writing_snapshot_count":  len(st.session_state.writing_keystroke_log),
+        "writing_snapshot_count":  len(real_log),
         "writing_llm_exchanges":   st.session_state.writing_llm_exchanges,
         "writing_llm_output":      st.session_state.writing_llm_output,
         "writing_post_recogn":     st.session_state.writing_post_recogn,
@@ -514,14 +596,20 @@ elif st.session_state.phase == 99:
         json.dumps(st.session_state.threat_responses,      ensure_ascii=False),
         json.dumps(st.session_state.source_responses,      ensure_ascii=False),
         str(st.session_state.writing_group),
+        str(st.session_state.writing_phase_start),
+        str(st.session_state.writing_phase_end),
         json.dumps(st.session_state.writing_keystroke_log, ensure_ascii=False),
         json.dumps(st.session_state.writing_llm_exchanges, ensure_ascii=False),
         str(st.session_state.writing_post_recogn),
         str(st.session_state.writing_post_appropriate),
     ]
-    col_names = ["col12 involvement", "col13 threat", "col14 source",
-                 "col33 writing_group", "col34 keystroke_log",
-                 "col35 llm_exchanges", "col36 post_recogn", "col37 post_appropriate"]
+    col_names = [
+        "col12 involvement", "col13 threat", "col14 source",
+        "col33 writing_group",
+        "col34 writing_phase_start", "col35 writing_phase_end",
+        "col36 keystroke_log", "col37 llm_exchanges",
+        "col38 post_recogn", "col39 post_appropriate",
+    ]
     for name, val in zip(col_names, sheet_row):
         with st.expander(name):
             st.code(val, language="json")

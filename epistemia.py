@@ -67,7 +67,7 @@ if "session_initialized" not in st.session_state:
         "source_responses":         {},
         "writing_group":            random.choice(["A", "B"]),
         "writing_text_final":       "",
-        "writing_keystroke_log":    {},
+        "writing_keystroke_log":    {},   # {ISO timestamp: full text snapshot}
         "writing_llm_output":       "",
         "writing_llm_exchanges":    [],
         "writing_post_recogn":      None,
@@ -76,8 +76,6 @@ if "session_initialized" not in st.session_state:
         "writing_chat_initialized": False,
         "gemini_model":             None,
         "writing_chat":             None,
-        # hidden field that receives the JSON log from JS
-        "ks_log_field":             "{}",
     })
 
 # ============================================================================
@@ -111,6 +109,19 @@ def render_7pt_item(label, key):
     st.markdown("")
 
 # ============================================================================
+# HELPERS — on_change callback for the writing textarea
+#
+# Streamlit calls on_change every time the user leaves the textarea (focus
+# out) or after a pause. Each call records a timestamped snapshot.
+# This gives a clean log of the text evolution without any JS tricks.
+# ============================================================================
+def _record_snapshot(textarea_key: str):
+    """Called by on_change — records current textarea value with timestamp."""
+    text = st.session_state.get(textarea_key, "")
+    ts   = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    st.session_state.writing_keystroke_log[ts] = text
+
+# ============================================================================
 # HELPERS — Gemini
 # ============================================================================
 def get_gemini_model() -> GenerativeModel:
@@ -126,176 +137,6 @@ def get_gemini_model() -> GenerativeModel:
         )
         st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
     return st.session_state.gemini_model
-
-# ============================================================================
-# TRACKED WRITING WIDGET
-#
-# How it works:
-#   - We render a self-contained HTML form with a <textarea> and a hidden
-#     <input> that holds the JSON keystroke log.
-#   - The <textarea> fires an `input` event listener on every character;
-#     each event appends {ISO_ms_timestamp: full_text} to the log object
-#     and serialises it into the hidden input.
-#   - Clicking "Continue" inside the component calls
-#     Streamlit.setComponentValue({text, log}) which sends data back to
-#     Python as the return value of st.components.v1.declare_component.
-#
-# We use streamlit's STATIC component approach: declare_component pointing
-# at an inline HTML string written to a temp file in /tmp.
-# ============================================================================
-
-import os
-import tempfile
-import streamlit.components.v1 as components
-
-def _build_component():
-    """
-    Write the component HTML to a temp directory and declare it once.
-    Cached in session state so it is only built once per session.
-    """
-    if "ks_component" in st.session_state:
-        return st.session_state.ks_component
-
-    html_content = """<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; background: transparent; }
-  #ta {
-    width: 100%;
-    padding: 12px 14px;
-    border: 1.5px solid #d0ccc6;
-    border-radius: 8px;
-    font-size: 14.5px;
-    line-height: 1.65;
-    resize: vertical;
-    outline: none;
-    color: #1a1814;
-    background: #fff;
-    transition: border-color .18s;
-    display: block;
-  }
-  #ta:focus { border-color: #4e8cff; }
-  #footer { display: flex; align-items: center; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
-  #counter { font-size: 12.5px; color: #888; }
-  #warn { color: #c0392b; font-size: 13px; display: none; }
-  #btn {
-    padding: 11px 28px;
-    background: #2d5a8e; color: #fff;
-    border: none; border-radius: 8px;
-    font-size: 14.5px; font-weight: 600;
-    cursor: pointer;
-  }
-  #btn:hover { background: #1e4070; }
-</style>
-</head>
-<body>
-<textarea id="ta"></textarea>
-<div id="footer">
-  <button id="btn" onclick="submitData()">Continue &#8594;</button>
-  <span id="counter">0 words</span>
-  <span id="warn" id="warn">Please write at least <span id="min-words-label">50</span> words.</span>
-</div>
-
-<script>
-  const ta      = document.getElementById('ta');
-  const counter = document.getElementById('counter');
-  let log = {};
-  let minWords = 50;
-  let taHeight = 260;
-
-  // ── receive config from Python ──────────────────────────────────────────
-  function onRender(data) {
-    if (!data) return;
-    if (data.placeholder) ta.placeholder = data.placeholder;
-    if (data.height)      { ta.style.height = data.height + 'px'; taHeight = data.height; }
-    if (data.min_words)   { minWords = data.min_words; document.getElementById('min-words-label').textContent = minWords; }
-    if (data.existing_text && ta.value === '') ta.value = data.existing_text;
-    if (data.existing_log) {
-      try { log = JSON.parse(data.existing_log); } catch(e) { log = {}; }
-    }
-    updateCounter();
-    // tell Streamlit component frame height
-    Streamlit.setFrameHeight(taHeight + 80);
-  }
-
-  function wordCount(s) {
-    return s.trim() === '' ? 0 : s.trim().split(/\s+/).length;
-  }
-  function updateCounter() {
-    counter.textContent = wordCount(ta.value) + ' words';
-  }
-
-  // ── record every input event ────────────────────────────────────────────
-  ta.addEventListener('input', () => {
-    const ts = new Date().toISOString();   // millisecond precision
-    log[ts]  = ta.value;
-    updateCounter();
-  });
-
-  // ── submit ──────────────────────────────────────────────────────────────
-  function submitData() {
-    if (wordCount(ta.value) < minWords) {
-      document.getElementById('warn').style.display = 'inline';
-      return;
-    }
-    document.getElementById('warn').style.display = 'none';
-    // final snapshot
-    log[new Date().toISOString()] = ta.value;
-    Streamlit.setComponentValue({ text: ta.value, log: log });
-  }
-
-  Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (e) => onRender(e.detail.args));
-  Streamlit.setComponentReady();
-</script>
-<script src="https://unpkg.com/streamlit-component-lib/dist/index.js"></script>
-</body>
-</html>
-"""
-
-    # Write to a temp dir that Streamlit can serve as a static component
-    tmpdir = tempfile.mkdtemp()
-    with open(os.path.join(tmpdir, "index.html"), "w", encoding="utf-8") as f:
-        f.write(html_content)
-
-    comp = components.declare_component("keystroke_textarea", path=tmpdir)
-    st.session_state.ks_component = comp
-    return comp
-
-
-def writing_textarea_tracked(component_key: str, height: int = 260,
-                              placeholder: str = "Write your thoughts here…",
-                              min_words: int = 50):
-    """
-    Renders the keystroke-tracked textarea component.
-    Returns dict {text, log} when user clicks Continue, else None.
-    """
-    comp = _build_component()
-
-    existing_text = st.session_state.get(f"_kst_{component_key}_text", "")
-    existing_log  = json.dumps(
-        st.session_state.get(f"_kst_{component_key}_log", {}),
-        ensure_ascii=False
-    )
-
-    result = comp(
-        placeholder=placeholder,
-        height=height,
-        min_words=min_words,
-        existing_text=existing_text,
-        existing_log=existing_log,
-        key=component_key,
-        default=None,
-    )
-
-    if result is not None:
-        # persist so reruns don't lose text
-        st.session_state[f"_kst_{component_key}_text"] = result.get("text", "")
-        st.session_state[f"_kst_{component_key}_log"]  = result.get("log", {})
-
-    return result
 
 # ============================================================================
 # PHASE 9 — Conversation Perception
@@ -357,8 +198,11 @@ elif st.session_state.phase == 9.1:
 elif st.session_state.phase == 9.2:
     group = st.session_state.writing_group
 
-    def _writing_ui(component_key: str, height: int):
-        st.markdown("**Please write around 5 lines expressing your personal perception of the following norm:**")
+    def _writing_ui(textarea_key: str, height: int):
+        """Norm box + textarea with on_change tracking + continue button."""
+        st.markdown(
+            "**Please write around 5 lines expressing your personal perception of the following norm:**"
+        )
         st.markdown(
             f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
             f"padding:12px 16px;border-radius:4px;font-style:italic;margin-bottom:16px;'>"
@@ -366,11 +210,27 @@ elif st.session_state.phase == 9.2:
             unsafe_allow_html=True,
         )
 
-        result = writing_textarea_tracked(component_key, height=height, min_words=50)
+        # Standard Streamlit textarea — stable, no remounting issues.
+        # on_change fires every time the user stops typing and the widget
+        # loses focus (or Streamlit detects a change), recording a snapshot.
+        st.text_area(
+            "Your answer:",
+            height=height,
+            key=textarea_key,
+            label_visibility="collapsed",
+            placeholder="Write your thoughts here…",
+            on_change=_record_snapshot,
+            args=(textarea_key,),
+        )
 
-        if result is not None:
-            st.session_state.writing_text_final    = result["text"]
-            st.session_state.writing_keystroke_log = result["log"]
+        if st.button("Continue →", key=f"btn_{textarea_key}"):
+            text = st.session_state.get(textarea_key, "").strip()
+            if len(text.split()) < 50:
+                st.warning("Please write at least 50 words before continuing.")
+                st.stop()
+            # Record a final snapshot at submit time
+            _record_snapshot(textarea_key)
+            st.session_state.writing_text_final = text
             st.session_state.phase = 9.3
             st.rerun()
 
@@ -496,7 +356,7 @@ elif st.session_state.phase == 99:
     st.write(f"Word count: **{final_words}**")
 
     n_entries = len(st.session_state.writing_keystroke_log)
-    st.markdown(f"**Keystroke log** — {n_entries} entries (one per input event, ms precision):")
+    st.markdown(f"**Change log** — {n_entries} snapshots (recorded on each focus-out / pause):")
     st.json(st.session_state.writing_keystroke_log)
 
     if st.session_state.writing_group == "B":
@@ -512,19 +372,19 @@ elif st.session_state.phase == 99:
     st.markdown("---")
     st.markdown("## Full data payload")
     payload = {
-        "involvement_responses":    st.session_state.involvement_responses,
-        "threat_responses":         st.session_state.threat_responses,
-        "source_responses":         st.session_state.source_responses,
-        "writing_group":            st.session_state.writing_group,
-        "writing_norm":             WRITING_FIXED_NORM,
-        "writing_text_final":       st.session_state.writing_text_final,
-        "writing_keystroke_log":    st.session_state.writing_keystroke_log,
-        "writing_keystroke_count":  len(st.session_state.writing_keystroke_log),
-        "writing_llm_exchanges":    st.session_state.writing_llm_exchanges,
-        "writing_llm_output":       st.session_state.writing_llm_output,
-        "writing_post_recogn":      st.session_state.writing_post_recogn,
-        "writing_post_appropriate": st.session_state.writing_post_appropriate,
-        "timestamp":                datetime.now().isoformat(),
+        "involvement_responses":   st.session_state.involvement_responses,
+        "threat_responses":        st.session_state.threat_responses,
+        "source_responses":        st.session_state.source_responses,
+        "writing_group":           st.session_state.writing_group,
+        "writing_norm":            WRITING_FIXED_NORM,
+        "writing_text_final":      st.session_state.writing_text_final,
+        "writing_keystroke_log":   st.session_state.writing_keystroke_log,
+        "writing_snapshot_count":  len(st.session_state.writing_keystroke_log),
+        "writing_llm_exchanges":   st.session_state.writing_llm_exchanges,
+        "writing_llm_output":      st.session_state.writing_llm_output,
+        "writing_post_recogn":     st.session_state.writing_post_recogn,
+        "writing_post_appropriate":st.session_state.writing_post_appropriate,
+        "timestamp":               datetime.now().isoformat(),
     }
     st.json(payload)
 

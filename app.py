@@ -889,7 +889,7 @@ elif st.session_state.phase == 9.1:
 
     st.markdown("## Writing Task — Instructions")
     st.markdown("---")
-    st.markdown("**Please write around 100 words expressing your personal perception of a specific social norm.**")
+    st.markdown(f"**Please write around {WORD_MIN} words expressing your personal perception of a specific social norm.**")
     st.markdown(
         "There is **no right or wrong answer**. Write freely — you can describe "
         "what you think about the norm, share a personal experience, or argue a position."
@@ -931,7 +931,7 @@ elif st.session_state.phase == 9.2:
     # ── Shared writing UI (used by both groups) ──────────────────────────────
     def _writing_ui(textarea_key: str, height: int):
         st.markdown(
-            "**Please write around 50 words expressing your personal perception of the following norm:**"
+            f"**Please write around {WORD_MIN} words expressing your personal perception of the following norm:**"
         )
         st.markdown(
             f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"

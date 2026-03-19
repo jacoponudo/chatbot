@@ -237,7 +237,7 @@ def get_gemini_model() -> GenerativeModel:
             location=st.secrets.get("gcp_location", "europe-west9"),
             credentials=vertex_creds,
         )
-        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
+        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash-lite")
     return st.session_state.gemini_model
 
 # ============================================================================

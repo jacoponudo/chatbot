@@ -126,7 +126,7 @@ def get_gemini_model() -> GenerativeModel:
             location=st.secrets.get("gcp_location", "europe-west9"),
             credentials=vertex_creds,
         )
-        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
+        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash-lite")
     return st.session_state.gemini_model
 
 
@@ -212,8 +212,8 @@ def scroll_to_top_on_phase_entry():
 # LIKERT-7 HELPERS
 # ============================================================================
 LIKERT_LABELS = [
-    "1\nExtremely inappropriate", "2\nVery inappropriate", "3\nSomewhat inappropriate",
-    "4\nNeither", "5\nSomewhat appropriate", "6\nVery appropriate", "7\nExtremely appropriate",
+    "Extremely inappropriate", "Very inappropriate", "Somewhat inappropriate",
+    "Neither", "Somewhat appropriate", "Very appropriate", "Extremely appropriate",
 ]
 
 def likert_7(key, labels=None):

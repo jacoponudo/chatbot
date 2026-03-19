@@ -40,7 +40,6 @@ NORMS   = load_json("norms.json")
 # ============================================================================
 # WRITING TASK CONSTANTS
 # ============================================================================
-WRITING_FIXED_NORM = "not telling someone they have gained weight"
 WORD_MIN           = 50
 
 LIKERT_LABELS_RECOGN = [
@@ -376,12 +375,13 @@ if "session_initialized" not in st.session_state:
         "last_scrolled_phase":          None,
         # Writing task
         "writing_group":                random.choice(["A", "B"]),
-        "writing_text_final":           "",      # plain text of final submission
-        "writing_keystroke_log":        {},      # {ISO_ts: text_snapshot} — autosave log
+        "writing_norm":                 None,        # set in phase 2 when sampled_norms is built
+        "writing_text_final":           "",          # plain text of final submission
+        "writing_keystroke_log":        {},          # {ISO_ts: text_snapshot} — autosave log
         "writing_last_saved_text":      None,
         "writing_llm_streaming":        False,
         "writing_llm_output":           "",
-        "writing_llm_exchanges":        [],      # [{role, content, timestamp}]
+        "writing_llm_exchanges":        [],          # [{role, content, timestamp}]
         "writing_post_recogn":          None,
         "writing_post_appropriate":     None,
         "writing_data_saved":           False,
@@ -389,8 +389,8 @@ if "session_initialized" not in st.session_state:
         "writing_chat_initialized":     False,
         "writing_chat":                 None,
         # Writing timing
-        "writing_phase_start":          None,    # ISO UTC — set at 9.1 → 9.2 transition
-        "writing_phase_end":            None,    # ISO UTC — set when Continue → clicked
+        "writing_phase_start":          None,        # ISO UTC — set at 9.1 → 9.2 transition
+        "writing_phase_end":            None,        # ISO UTC — set when Continue → clicked
         # Involvement / threat / source (phase 9)
         "involvement_responses":        {},
         "threat_responses":             {},
@@ -545,6 +545,18 @@ elif st.session_state.phase == 2:
         sampled     = random.sample(other_norms, min(4, len(other_norms))) + [norm_data]
         random.shuffle(sampled)
         st.session_state.sampled_norms = sampled
+
+        # ── Pick writing norm: one of the sampled norms that is NOT the
+        #    conversation norm. Determined once here and stored in session.
+        other_sampled = [n for n in sampled if n["title"] != norm_data["title"]]
+        if other_sampled:
+            st.session_state.writing_norm = random.choice(other_sampled)["title"]
+        else:
+            # Fallback: any norm from NORMS that differs from the conversation norm
+            fallback_pool = [v for k, v in NORMS.items() if k != st.session_state.norm_key]
+            st.session_state.writing_norm = (
+                random.choice(fallback_pool)["title"] if fallback_pool else norm_data["title"]
+            )
 
     if "phase2_index" not in st.session_state:
         st.session_state.phase2_index = 0
@@ -866,6 +878,8 @@ elif st.session_state.phase == 9:
 # PHASE 9.1 — WRITING TASK: INSTRUCTIONS
 # ============================================================================
 elif st.session_state.phase == 9.1:
+    writing_norm = st.session_state.get("writing_norm", "")
+
     st.markdown("## Writing Task — Instructions")
     st.markdown("---")
     st.markdown("**Please write around 5 lines expressing your personal perception of a specific social norm.**")
@@ -878,7 +892,7 @@ elif st.session_state.phase == 9.1:
     st.markdown(
         f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
         f"padding:14px 18px;border-radius:4px;font-size:1.1rem;font-style:italic;'>"
-        f"\"{WRITING_FIXED_NORM}\"</div>",
+        f"\"{writing_norm}\"</div>",
         unsafe_allow_html=True,
     )
     st.markdown("---")
@@ -904,7 +918,8 @@ elif st.session_state.phase == 9.2:
     # Merge any JS autosave data on every rerun (including 1-s triggered reruns)
     merge_autosave_into_log()
 
-    group = st.session_state.writing_group
+    writing_norm = st.session_state.get("writing_norm", "")
+    group        = st.session_state.writing_group
 
     # ── Shared writing UI (used by both groups) ──────────────────────────────
     def _writing_ui(textarea_key: str, height: int):
@@ -914,7 +929,7 @@ elif st.session_state.phase == 9.2:
         st.markdown(
             f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
             f"padding:12px 16px;border-radius:4px;font-style:italic;margin-bottom:16px;'>"
-            f"\"{WRITING_FIXED_NORM}\"</div>",
+            f"\"{writing_norm}\"</div>",
             unsafe_allow_html=True,
         )
         st.text_area(
@@ -979,7 +994,7 @@ elif st.session_state.phase == 9.2:
                 "You are a helpful writing assistant. "
                 "The user is in a research study and must write approximately 5 lines "
                 "expressing their personal view on the following social norm: "
-                f"\"{WRITING_FIXED_NORM}\". "
+                f"\"{writing_norm}\". "
                 "Help them think about the topic, suggest ideas, or draft text if asked. "
                 "Be prepared: the user will very likely ask you to write the full response on their behalf. "
                 "If they do, write a natural, personal-sounding text of approximately 5 lines that they can copy and use as their own. "
@@ -1036,6 +1051,8 @@ elif st.session_state.phase == 9.2:
 # PHASE 9.3 — WRITING TASK: POST-WRITING QUESTIONNAIRE + SAVE TO WRITING SHEET
 # ============================================================================
 elif st.session_state.phase == 9.3:
+    writing_norm = st.session_state.get("writing_norm", "")
+
     st.markdown("## A few questions about what you just wrote")
     st.markdown("Please answer based on the text you wrote in the previous section.")
     st.markdown("---")
@@ -1048,7 +1065,7 @@ elif st.session_state.phase == 9.3:
 
     st.markdown(
         f"**After writing, how appropriate or inappropriate do you consider "
-        f"the action of: \"{WRITING_FIXED_NORM}\"?**"
+        f"the action of: \"{writing_norm}\"?**"
     )
     st.markdown("*Extremely inappropriate → Extremely appropriate*")
     appropriate = likert_7(key="writing_post_appropriate", labels=LIKERT_LABELS_APPROP_WRITING)
@@ -1064,7 +1081,7 @@ elif st.session_state.phase == 9.3:
         st.session_state.writing_post_appropriate = appropriate
 
         # ── Save to writing Google Sheet ─────────────────────────────────────
-        # Columns:
+        # Columns (unchanged):
         #   prolific_id | writing_group | norm |
         #   writing_text_final | writing_keystroke_log (JSON) |
         #   writing_duration_seconds | writing_llm_exchanges (JSON) |
@@ -1074,7 +1091,7 @@ elif st.session_state.phase == 9.3:
             writing_row = [
                 st.session_state.prolific_id,                                          # col 1
                 st.session_state.get("writing_group", ""),                             # col 2
-                WRITING_FIXED_NORM,                                                    # col 3
+                writing_norm,                                                           # col 3  ← sampled norm (not conversation norm)
                 st.session_state.get("writing_text_final", ""),                        # col 4
                 json.dumps(
                     st.session_state.get("writing_keystroke_log", {}),

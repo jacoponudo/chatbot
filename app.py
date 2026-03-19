@@ -126,7 +126,7 @@ def get_gemini_model() -> GenerativeModel:
             location=st.secrets.get("gcp_location", "europe-west9"),
             credentials=vertex_creds,
         )
-        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash-lite")
+        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
     return st.session_state.gemini_model
 
 
@@ -212,8 +212,8 @@ def scroll_to_top_on_phase_entry():
 # LIKERT-7 HELPERS
 # ============================================================================
 LIKERT_LABELS = [
-    "Extremely inappropriate", "Very inappropriate", "Somewhat inappropriate",
-    "Neither", "Somewhat appropriate", "Very appropriate", "Extremely appropriate",
+    "1\nExtremely inappropriate", "2\nVery inappropriate", "3\nSomewhat inappropriate",
+    "4\nNeither", "5\nSomewhat appropriate", "6\nVery appropriate", "7\nExtremely appropriate",
 ]
 
 def likert_7(key, labels=None):
@@ -1066,34 +1066,27 @@ elif st.session_state.phase == 9.3:
         # ── Save to writing Google Sheet ─────────────────────────────────────
         # Columns:
         #   prolific_id | writing_group | norm |
-        #   writing_text_final (plain text) |
-        #   writing_keystroke_log (JSON: {ISO_ts: snapshot, __phase_start__, __phase_end__}) |
-        #   writing_phase_start | writing_phase_end | writing_duration_seconds |
-        #   writing_llm_output | writing_llm_exchanges (JSON) | n_llm_turns |
-        #   post_recogn | post_appropriate | timestamp
+        #   writing_text_final | writing_keystroke_log (JSON) |
+        #   writing_duration_seconds | writing_llm_exchanges (JSON) |
+        #   post_recogn | post_appropriate
         if not st.session_state.writing_data_saved:
             dur_s = _compute_duration_seconds()
             writing_row = [
-                st.session_state.prolific_id,
-                st.session_state.get("writing_group", ""),
-                WRITING_FIXED_NORM,
-                st.session_state.get("writing_text_final", ""),
+                st.session_state.prolific_id,                                          # col 1
+                st.session_state.get("writing_group", ""),                             # col 2
+                WRITING_FIXED_NORM,                                                    # col 3
+                st.session_state.get("writing_text_final", ""),                        # col 4
                 json.dumps(
                     st.session_state.get("writing_keystroke_log", {}),
                     ensure_ascii=False,
-                ),
-                str(st.session_state.get("writing_phase_start", "")),
-                str(st.session_state.get("writing_phase_end",   "")),
-                str(dur_s),
-                st.session_state.get("writing_llm_output", ""),
+                ),                                                                      # col 5
+                str(dur_s),                                                             # col 6
                 json.dumps(
                     st.session_state.get("writing_llm_exchanges", []),
                     ensure_ascii=False,
-                ),
-                str(len(st.session_state.get("writing_llm_exchanges", [])) // 2),
-                str(st.session_state.get("writing_post_recogn",      "")),
-                str(st.session_state.get("writing_post_appropriate",  "")),
-                datetime.now().isoformat(),
+                ),                                                                      # col 7
+                str(st.session_state.get("writing_post_recogn",     "")),              # col 8
+                str(st.session_state.get("writing_post_appropriate", "")),             # col 9
             ]
             try:
                 save_to_writing_sheet(writing_row)
@@ -1336,15 +1329,13 @@ elif st.session_state.phase == 14 and not st.session_state.data_saved:
                 st.session_state.get("writing_keystroke_log", {}),
                 ensure_ascii=False,
             ),                                                                                      # col 34  keystroke log JSON
-            str(st.session_state.get("writing_phase_start", "")),                                  # col 35  writing start ISO
-            str(st.session_state.get("writing_phase_end",   "")),                                  # col 36  writing end ISO
-            str(_compute_duration_seconds()),                                                       # col 37  writing duration (s)
+            str(_compute_duration_seconds()),                                                       # col 35  writing duration (s)
             json.dumps(
                 st.session_state.get("writing_llm_exchanges", []),
                 ensure_ascii=False,
-            ),                                                                                      # col 38  AI chat JSON (Group B)
-            str(st.session_state.get("writing_post_recogn",      "")),                             # col 39  post-writing recogn
-            str(st.session_state.get("writing_post_appropriate",  "")),                             # col 40  post-writing appropriate
+            ),                                                                                      # col 36  AI chat JSON (Group B)
+            str(st.session_state.get("writing_post_recogn",      "")),                             # col 37  post-writing recogn
+            str(st.session_state.get("writing_post_appropriate",  "")),                             # col 38  post-writing appropriate
         ]
 
         try:

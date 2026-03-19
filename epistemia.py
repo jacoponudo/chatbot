@@ -6,7 +6,6 @@ from datetime import datetime
 import vertexai
 from vertexai.generative_models import GenerativeModel
 from google.oauth2.service_account import Credentials
-from streamlit_autorefresh import st_autorefresh
 
 # ============================================================================
 # PAGE CONFIG
@@ -110,17 +109,90 @@ def render_7pt_item(label, key):
     st.markdown("")
 
 # ============================================================================
-# HELPERS — snapshot recorder
-# Called once per second by st_autorefresh (only during phase 9.2).
-# Records the current textarea value only if it has changed since last tick.
+# HELPERS — JS-based 1-second sampler
+#
+# Injects a <script> tag directly into the Streamlit page (not an iframe).
+# The script runs a setInterval every 1000ms, reads the textarea value,
+# and if changed writes {timestamp: text} into a hidden <div id="ks-store">.
+#
+# On submit, a second snippet reads ks-store and writes the JSON into the
+# Streamlit text_input with key "ks_log_hidden" by simulating a native input
+# event — which makes Streamlit pick up the new value on the next rerun.
 # ============================================================================
-def _record_snapshot_if_changed(textarea_key: str):
-    text = st.session_state.get(textarea_key, "")
-    last = st.session_state.get("_last_recorded_text", None)
-    if text != last and text.strip() != "":
-        ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-        st.session_state.writing_keystroke_log[ts] = text
-        st.session_state["_last_recorded_text"] = text
+
+def inject_sampler_js(textarea_key: str):
+    """
+    Inject JS that samples the textarea every second.
+    The ks-store div accumulates {ISO_ts: text} entries.
+    Call once after rendering the textarea.
+    """
+    st.markdown(f"""
+<div id="ks-store" style="display:none">{{{{ }}</div>
+<script>
+(function() {{
+    // avoid double-init on reruns
+    if (window._ksSamplerRunning) return;
+    window._ksSamplerRunning = true;
+    window._ksLog = {{}};
+    let lastText = null;
+
+    function findTextarea() {{
+        // Streamlit renders textareas inside the stTextArea component
+        const tas = document.querySelectorAll('textarea');
+        // return the first non-disabled one (our writing area)
+        for (const ta of tas) {{
+            if (!ta.disabled) return ta;
+        }}
+        return null;
+    }}
+
+    function sample() {{
+        const ta = findTextarea();
+        if (!ta) return;
+        const val = ta.value;
+        if (val === lastText || val.trim() === '') return;
+        lastText = val;
+        const ts = new Date().toISOString();
+        window._ksLog[ts] = val;
+        // also store in the DOM so Python can read it at submit
+        const store = document.getElementById('ks-store');
+        if (store) store.textContent = JSON.stringify(window._ksLog);
+    }}
+
+    setInterval(sample, 1000);
+}})();
+</script>
+""", unsafe_allow_html=True)
+
+
+def inject_submit_js(hidden_input_label: str):
+    """
+    Inject JS that on form submit reads _ksLog and pushes it into the
+    hidden Streamlit text_input so Python receives it on the next rerun.
+    hidden_input_label must match the label of the st.text_input used as sink.
+    """
+    st.markdown(f"""
+<script>
+(function() {{
+    // find the hidden text input by its aria-label
+    function findHiddenInput() {{
+        return document.querySelector('input[aria-label="{hidden_input_label}"]');
+    }}
+
+    // expose globally so the Continue button onclick can call it
+    window._ksFlush = function() {{
+        const inp = findHiddenInput();
+        if (!inp) return;
+        const log = JSON.stringify(window._ksLog || {{}});
+        // set native value so React picks it up
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value').set;
+        nativeInputValueSetter.call(inp, log);
+        inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    }};
+}})();
+</script>
+""", unsafe_allow_html=True)
 
 # ============================================================================
 # HELPERS — Gemini
@@ -199,11 +271,10 @@ elif st.session_state.phase == 9.1:
 elif st.session_state.phase == 9.2:
     group = st.session_state.writing_group
 
-    # autorefresh every 1 second to sample the textarea
-    st_autorefresh(interval=1_000, key="writing_autorefresh")
+    HIDDEN_LABEL = "ks_log_sink"
 
     def _writing_ui(textarea_key: str, height: int):
-        """Norm box + textarea sampled every second + continue button."""
+        """Norm box + JS-sampled textarea + hidden sink + continue button."""
         st.markdown(
             "**Please write around 5 lines expressing your personal perception of the following norm:**"
         )
@@ -222,17 +293,64 @@ elif st.session_state.phase == 9.2:
             placeholder="Write your thoughts here…",
         )
 
-        # sample on every rerun (= every 1 s from autorefresh)
-        _record_snapshot_if_changed(textarea_key)
+        # inject sampler after textarea
+        inject_sampler_js(textarea_key)
+
+        # hidden text_input that JS will write the log JSON into
+        st.markdown(
+            "<style>div[data-testid='stTextInput']:has(input[aria-label='ks_log_sink']) "
+            "{ position:absolute; opacity:0; pointer-events:none; height:0; }</style>",
+            unsafe_allow_html=True,
+        )
+        st.text_input(HIDDEN_LABEL, key="ks_log_hidden", label_visibility="hidden")
+
+        inject_submit_js(HIDDEN_LABEL)
+
+        # Button with onclick that flushes JS log into hidden input first
+        st.markdown(
+            """<script>
+            (function() {
+                // wrap the Continue button to call _ksFlush before Streamlit processes click
+                function patchBtn() {
+                    const btns = document.querySelectorAll('button[kind="secondary"], button[kind="primary"]');
+                    btns.forEach(btn => {
+                        if (btn.textContent.trim().startsWith("Continue") && !btn._ksPatchted) {
+                            btn._ksPatchted = true;
+                            btn.addEventListener("click", function() {
+                                if (window._ksFlush) window._ksFlush();
+                            }, true);
+                        }
+                    });
+                }
+                // try immediately and after a short delay
+                patchBtn();
+                setTimeout(patchBtn, 500);
+                setTimeout(patchBtn, 1500);
+            })();
+            </script>""",
+            unsafe_allow_html=True,
+        )
 
         if st.button("Continue →", key=f"btn_{textarea_key}"):
             text = st.session_state.get(textarea_key, "").strip()
             if len(text.split()) < 50:
                 st.warning("Please write at least 50 words before continuing.")
                 st.stop()
-            # final snapshot at submit
-            _record_snapshot_if_changed(textarea_key)
-            st.session_state.writing_text_final = text
+
+            # read the log from the hidden input that JS populated
+            raw_log = st.session_state.get("ks_log_hidden", "{}")
+            try:
+                ks_log = json.loads(raw_log) if raw_log else {}
+            except Exception:
+                ks_log = {}
+
+            # fallback: if JS log is empty, at least save the final text
+            if not ks_log:
+                ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+                ks_log[ts] = text
+
+            st.session_state.writing_text_final    = text
+            st.session_state.writing_keystroke_log = ks_log
             st.session_state.phase = 9.3
             st.rerun()
 

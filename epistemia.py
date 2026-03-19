@@ -67,7 +67,7 @@ if "session_initialized" not in st.session_state:
         "source_responses":         {},
         "writing_group":            random.choice(["A", "B"]),
         "writing_text_final":       "",
-        "writing_keystroke_log":    {},   # {ISO timestamp: partial text snapshot}
+        "writing_keystroke_log":    {},   # {ISO timestamp: full text snapshot}
         "writing_llm_output":       "",
         "writing_llm_exchanges":    [],
         "writing_post_recogn":      None,
@@ -109,142 +109,90 @@ def render_7pt_item(label, key):
     st.markdown("")
 
 # ============================================================================
-# HELPERS — Autosave JS
+# HELPERS — JS-based 1-second sampler
 #
-# Strategy:
-#   1. Every 1 second, JS reads the textarea and writes a {timestamp: text}
-#      entry into a hidden <input> (the "autosave sink").
-#   2. A second hidden <input> acts as a "flush trigger": JS toggles its value
-#      between "0" and "1" each second, causing Streamlit to detect a widget
-#      change and rerun the script.
-#   3. On each rerun, Python reads the autosave sink and merges the JSON log
-#      into st.session_state.writing_keystroke_log — accumulating ALL snapshots.
-#   4. On Continue, the final text + complete accumulated log are saved.
+# Injects a <script> tag directly into the Streamlit page (not an iframe).
+# The script runs a setInterval every 1000ms, reads the textarea value,
+# and if changed writes {timestamp: text} into a hidden <div id="ks-store">.
 #
-# NOTE: Streamlit only reruns when a widget value CHANGES, so the flip-flop
-# trigger ("0"→"1"→"0"→…) ensures a rerun every ~1 second while the user types.
+# On submit, a second snippet reads ks-store and writes the JSON into the
+# Streamlit text_input with key "ks_log_hidden" by simulating a native input
+# event — which makes Streamlit pick up the new value on the next rerun.
 # ============================================================================
 
-AUTOSAVE_SINK_LABEL   = "autosave_json_sink"
-AUTOSAVE_TRIGGER_LABEL = "autosave_trigger"
-
-def inject_autosave_js():
+def inject_sampler_js(textarea_key: str):
     """
-    Inject JS that:
-    - Samples the textarea every 1 second.
-    - Accumulates {ISO_ts: text} in window._ksLog (persists across reruns).
-    - Writes the full JSON into the hidden autosave_json_sink input.
-    - Flips the autosave_trigger input between "0"/"1" every second
-      so Streamlit detects a widget change and reruns.
-
-    Key fix: we ALWAYS clear the previous interval and start a fresh one.
-    Streamlit reruns re-inject this script, so we must not use a "already
-    running" guard — instead we clear the old interval and restart cleanly,
-    while preserving window._ksLog so accumulated data is never lost.
+    Inject JS that samples the textarea every second.
+    The ks-store div accumulates {ISO_ts: text} entries.
+    Call once after rendering the textarea.
     """
     st.markdown(f"""
+<div id="ks-store" style="display:none">{{{{ }}</div>
 <script>
 (function() {{
-    // Preserve the log across reruns — never reset it
-    window._ksLog = window._ksLog || {{}};
-
-    // Clear any previous interval so we don't stack multiple timers
-    if (window._autosaveIntervalId != null) {{
-        clearInterval(window._autosaveIntervalId);
-        window._autosaveIntervalId = null;
-    }}
-
+    // avoid double-init on reruns
+    if (window._ksSamplerRunning) return;
+    window._ksSamplerRunning = true;
+    window._ksLog = {{}};
     let lastText = null;
-    let triggerFlip = false;
-
-    function nativeSet(el, val) {{
-        const setter = Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype, 'value').set;
-        setter.call(el, val);
-        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-    }}
-
-    function findInput(label) {{
-        return document.querySelector('input[aria-label="' + label + '"]');
-    }}
 
     function findTextarea() {{
+        // Streamlit renders textareas inside the stTextArea component
         const tas = document.querySelectorAll('textarea');
+        // return the first non-disabled one (our writing area)
         for (const ta of tas) {{
             if (!ta.disabled) return ta;
         }}
         return null;
     }}
 
-    function tick() {{
+    function sample() {{
         const ta = findTextarea();
-        if (ta) {{
-            const val = ta.value;
-            if (val !== lastText && val.trim() !== '') {{
-                lastText = val;
-                const ts = new Date().toISOString();
-                window._ksLog[ts] = val;
-
-                const sink = findInput('{AUTOSAVE_SINK_LABEL}');
-                if (sink) {{
-                    nativeSet(sink, JSON.stringify(window._ksLog));
-                }}
-            }}
-        }}
-
-        // Flip trigger every second to force Streamlit rerun
-        const trigger = findInput('{AUTOSAVE_TRIGGER_LABEL}');
-        if (trigger) {{
-            triggerFlip = !triggerFlip;
-            nativeSet(trigger, triggerFlip ? '1' : '0');
-        }}
+        if (!ta) return;
+        const val = ta.value;
+        if (val === lastText || val.trim() === '') return;
+        lastText = val;
+        const ts = new Date().toISOString();
+        window._ksLog[ts] = val;
+        // also store in the DOM so Python can read it at submit
+        const store = document.getElementById('ks-store');
+        if (store) store.textContent = JSON.stringify(window._ksLog);
     }}
 
-    // Run immediately once, then every 1000ms
-    tick();
-    window._autosaveIntervalId = setInterval(tick, 1000);
+    setInterval(sample, 1000);
 }})();
 </script>
 """, unsafe_allow_html=True)
 
 
-def render_autosave_inputs():
+def inject_submit_js(hidden_input_label: str):
     """
-    Render the two hidden inputs used by the autosave JS.
-    Returns (json_sink_value, trigger_value).
+    Inject JS that on form submit reads _ksLog and pushes it into the
+    hidden Streamlit text_input so Python receives it on the next rerun.
+    hidden_input_label must match the label of the st.text_input used as sink.
     """
-    # Hide both inputs visually
-    st.markdown("""
-<style>
-div[data-testid='stTextInput']:has(input[aria-label='autosave_json_sink']),
-div[data-testid='stTextInput']:has(input[aria-label='autosave_trigger'])
-{ position:absolute; opacity:0; pointer-events:none; height:0; overflow:hidden; }
-</style>
+    st.markdown(f"""
+<script>
+(function() {{
+    // find the hidden text input by its aria-label
+    function findHiddenInput() {{
+        return document.querySelector('input[aria-label="{hidden_input_label}"]');
+    }}
+
+    // expose globally so the Continue button onclick can call it
+    window._ksFlush = function() {{
+        const inp = findHiddenInput();
+        if (!inp) return;
+        const log = JSON.stringify(window._ksLog || {{}});
+        // set native value so React picks it up
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value').set;
+        nativeInputValueSetter.call(inp, log);
+        inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    }};
+}})();
+</script>
 """, unsafe_allow_html=True)
-
-    sink_val    = st.text_input(AUTOSAVE_SINK_LABEL,    key="autosave_json_sink",    label_visibility="hidden")
-    trigger_val = st.text_input(AUTOSAVE_TRIGGER_LABEL, key="autosave_trigger_val",  label_visibility="hidden")
-    return sink_val, trigger_val
-
-
-def merge_autosave_into_log():
-    """
-    Read the current autosave sink and merge new entries into
-    st.session_state.writing_keystroke_log (accumulates across reruns).
-    """
-    raw = st.session_state.get("autosave_json_sink", "")
-    if not raw:
-        return
-    try:
-        incoming = json.loads(raw)
-    except Exception:
-        return
-    # Merge: existing entries are never overwritten
-    log = st.session_state.writing_keystroke_log
-    for ts, text in incoming.items():
-        if ts not in log:
-            log[ts] = text
-    st.session_state.writing_keystroke_log = log
 
 # ============================================================================
 # HELPERS — Gemini
@@ -321,21 +269,12 @@ elif st.session_state.phase == 9.1:
 # PHASE 9.2 — Writing Task Screen
 # ============================================================================
 elif st.session_state.phase == 9.2:
-
-    # ── Merge any new autosave data from JS into session state ───────────────
-    # This runs on EVERY rerun (including the 1-second triggered reruns),
-    # so the log grows continuously while the user types.
-    merge_autosave_into_log()
-
     group = st.session_state.writing_group
 
-    # Show live snapshot count so researcher can verify autosave is working
-    n_snapshots = len(st.session_state.writing_keystroke_log)
-    if n_snapshots > 0:
-        st.caption(f"💾 Autosave active — {n_snapshots} snapshot{'s' if n_snapshots != 1 else ''} recorded")
+    HIDDEN_LABEL = "ks_log_sink"
 
     def _writing_ui(textarea_key: str, height: int):
-        """Norm box + textarea + autosave JS + continue button."""
+        """Norm box + JS-sampled textarea + hidden sink + continue button."""
         st.markdown(
             "**Please write around 5 lines expressing your personal perception of the following norm:**"
         )
@@ -354,11 +293,43 @@ elif st.session_state.phase == 9.2:
             placeholder="Write your thoughts here…",
         )
 
-        # Render hidden autosave inputs (sink + trigger)
-        render_autosave_inputs()
+        # inject sampler after textarea
+        inject_sampler_js(textarea_key)
 
-        # Inject the 1-second sampler + trigger JS
-        inject_autosave_js()
+        # hidden text_input that JS will write the log JSON into
+        st.markdown(
+            "<style>div[data-testid='stTextInput']:has(input[aria-label='ks_log_sink']) "
+            "{ position:absolute; opacity:0; pointer-events:none; height:0; }</style>",
+            unsafe_allow_html=True,
+        )
+        st.text_input(HIDDEN_LABEL, key="ks_log_hidden", label_visibility="hidden")
+
+        inject_submit_js(HIDDEN_LABEL)
+
+        # Button with onclick that flushes JS log into hidden input first
+        st.markdown(
+            """<script>
+            (function() {
+                // wrap the Continue button to call _ksFlush before Streamlit processes click
+                function patchBtn() {
+                    const btns = document.querySelectorAll('button[kind="secondary"], button[kind="primary"]');
+                    btns.forEach(btn => {
+                        if (btn.textContent.trim().startsWith("Continue") && !btn._ksPatchted) {
+                            btn._ksPatchted = true;
+                            btn.addEventListener("click", function() {
+                                if (window._ksFlush) window._ksFlush();
+                            }, true);
+                        }
+                    });
+                }
+                // try immediately and after a short delay
+                patchBtn();
+                setTimeout(patchBtn, 500);
+                setTimeout(patchBtn, 1500);
+            })();
+            </script>""",
+            unsafe_allow_html=True,
+        )
 
         if st.button("Continue →", key=f"btn_{textarea_key}"):
             text = st.session_state.get(textarea_key, "").strip()
@@ -366,15 +337,20 @@ elif st.session_state.phase == 9.2:
                 st.warning("Please write at least 50 words before continuing.")
                 st.stop()
 
-            # Final merge before leaving the phase
-            merge_autosave_into_log()
+            # read the log from the hidden input that JS populated
+            raw_log = st.session_state.get("ks_log_hidden", "{}")
+            try:
+                ks_log = json.loads(raw_log) if raw_log else {}
+            except Exception:
+                ks_log = {}
 
-            # Ensure at least one entry exists (fallback if JS never fired)
-            if not st.session_state.writing_keystroke_log:
+            # fallback: if JS log is empty, at least save the final text
+            if not ks_log:
                 ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-                st.session_state.writing_keystroke_log[ts] = text
+                ks_log[ts] = text
 
-            st.session_state.writing_text_final = text
+            st.session_state.writing_text_final    = text
+            st.session_state.writing_keystroke_log = ks_log
             st.session_state.phase = 9.3
             st.rerun()
 
@@ -500,7 +476,7 @@ elif st.session_state.phase == 99:
     st.write(f"Word count: **{final_words}**")
 
     n_entries = len(st.session_state.writing_keystroke_log)
-    st.markdown(f"**Change log** — {n_entries} snapshots (1-per-second autosave):")
+    st.markdown(f"**Change log** — {n_entries} snapshots (recorded on each focus-out / pause):")
     st.json(st.session_state.writing_keystroke_log)
 
     if st.session_state.writing_group == "B":

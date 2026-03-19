@@ -76,6 +76,8 @@ if "session_initialized" not in st.session_state:
         "writing_chat_initialized": False,
         "gemini_model":             None,
         "writing_chat":             None,
+        # hidden field that receives the JSON log from JS
+        "ks_log_field":             "{}",
     })
 
 # ============================================================================
@@ -109,93 +111,6 @@ def render_7pt_item(label, key):
     st.markdown("")
 
 # ============================================================================
-# HELPERS — JS keystroke tracker (invisible, attaches to Streamlit's textarea)
-#
-# Strategy:
-#   1. Render the normal st.text_area — Streamlit handles all input/state.
-#   2. Inject a small invisible JS snippet via st.components.v1.html that:
-#      - finds the textarea in the parent document
-#      - attaches an `input` listener recording {ISO_ms_timestamp: full_text}
-#      - stores the log in sessionStorage under a given key
-#   3. On "Continue", read the log back from sessionStorage via a second
-#      JS snippet that writes it into a hidden Streamlit text_input
-#      (which Python can read on the next rerun).
-#
-# We use a TWO-STEP approach to retrieve the log:
-#   Step A — user clicks Streamlit "Continue" button
-#   Step B — before the rerun processes, a JS snippet copies sessionStorage
-#            → a st.text_input that is hidden with CSS
-#            We set on_change on that hidden input to capture the value.
-# ============================================================================
-
-def inject_keystroke_tracker(storage_key: str = "ks_log"):
-    """
-    Injects JS into the parent page that attaches an `input` listener to
-    Streamlit's textarea and saves each snapshot to sessionStorage.
-    Must be called AFTER st.text_area is rendered.
-    """
-    js = f"""
-    <script>
-    (function() {{
-        const STORAGE_KEY = {json.dumps(storage_key)};
-
-        function attach() {{
-            // find all textareas in the parent document
-            const tas = window.parent.document.querySelectorAll('textarea');
-            if (!tas.length) {{ setTimeout(attach, 200); return; }}
-
-            // pick the last one rendered (the writing textarea)
-            const ta = tas[tas.length - 1];
-
-            if (ta._ks_attached) return;   // already attached
-            ta._ks_attached = true;
-
-            // restore existing log or start fresh
-            let log = {{}};
-            try {{ log = JSON.parse(window.parent.sessionStorage.getItem(STORAGE_KEY) || '{{}}'); }}
-            catch(e) {{}}
-
-            ta.addEventListener('input', function() {{
-                const ts = new Date().toISOString();
-                log[ts] = ta.value;
-                window.parent.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(log));
-            }});
-        }}
-
-        attach();
-    }})();
-    </script>
-    """
-    st.components.v1.html(js, height=0)
-
-
-def read_keystroke_log(storage_key: str = "ks_log"):
-    """
-    Injects JS that reads the log from sessionStorage and writes it
-    into the URL hash so Python can retrieve it via st.query_params.
-    Returns the log dict (may be empty on first call; populated after rerun).
-    """
-    js = f"""
-    <script>
-    (function() {{
-        const STORAGE_KEY = {json.dumps(storage_key)};
-        const raw = window.parent.sessionStorage.getItem(STORAGE_KEY) || '{{}}';
-        // write into a dedicated query param via history.replaceState
-        // (does NOT trigger a page reload)
-        const url = new URL(window.parent.location.href);
-        url.searchParams.set('ks_log', encodeURIComponent(raw));
-        window.parent.history.replaceState(null, '', url.toString());
-    }})();
-    </script>
-    """
-    st.components.v1.html(js, height=0)
-    raw = st.query_params.get("ks_log", "{}")
-    try:
-        return json.loads(raw)
-    except Exception:
-        return {}
-
-# ============================================================================
 # HELPERS — Gemini
 # ============================================================================
 def get_gemini_model() -> GenerativeModel:
@@ -211,6 +126,176 @@ def get_gemini_model() -> GenerativeModel:
         )
         st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
     return st.session_state.gemini_model
+
+# ============================================================================
+# TRACKED WRITING WIDGET
+#
+# How it works:
+#   - We render a self-contained HTML form with a <textarea> and a hidden
+#     <input> that holds the JSON keystroke log.
+#   - The <textarea> fires an `input` event listener on every character;
+#     each event appends {ISO_ms_timestamp: full_text} to the log object
+#     and serialises it into the hidden input.
+#   - Clicking "Continue" inside the component calls
+#     Streamlit.setComponentValue({text, log}) which sends data back to
+#     Python as the return value of st.components.v1.declare_component.
+#
+# We use streamlit's STATIC component approach: declare_component pointing
+# at an inline HTML string written to a temp file in /tmp.
+# ============================================================================
+
+import os
+import tempfile
+import streamlit.components.v1 as components
+
+def _build_component():
+    """
+    Write the component HTML to a temp directory and declare it once.
+    Cached in session state so it is only built once per session.
+    """
+    if "ks_component" in st.session_state:
+        return st.session_state.ks_component
+
+    html_content = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: transparent; }
+  #ta {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1.5px solid #d0ccc6;
+    border-radius: 8px;
+    font-size: 14.5px;
+    line-height: 1.65;
+    resize: vertical;
+    outline: none;
+    color: #1a1814;
+    background: #fff;
+    transition: border-color .18s;
+    display: block;
+  }
+  #ta:focus { border-color: #4e8cff; }
+  #footer { display: flex; align-items: center; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+  #counter { font-size: 12.5px; color: #888; }
+  #warn { color: #c0392b; font-size: 13px; display: none; }
+  #btn {
+    padding: 11px 28px;
+    background: #2d5a8e; color: #fff;
+    border: none; border-radius: 8px;
+    font-size: 14.5px; font-weight: 600;
+    cursor: pointer;
+  }
+  #btn:hover { background: #1e4070; }
+</style>
+</head>
+<body>
+<textarea id="ta"></textarea>
+<div id="footer">
+  <button id="btn" onclick="submitData()">Continue &#8594;</button>
+  <span id="counter">0 words</span>
+  <span id="warn" id="warn">Please write at least <span id="min-words-label">50</span> words.</span>
+</div>
+
+<script>
+  const ta      = document.getElementById('ta');
+  const counter = document.getElementById('counter');
+  let log = {};
+  let minWords = 50;
+  let taHeight = 260;
+
+  // ── receive config from Python ──────────────────────────────────────────
+  function onRender(data) {
+    if (!data) return;
+    if (data.placeholder) ta.placeholder = data.placeholder;
+    if (data.height)      { ta.style.height = data.height + 'px'; taHeight = data.height; }
+    if (data.min_words)   { minWords = data.min_words; document.getElementById('min-words-label').textContent = minWords; }
+    if (data.existing_text && ta.value === '') ta.value = data.existing_text;
+    if (data.existing_log) {
+      try { log = JSON.parse(data.existing_log); } catch(e) { log = {}; }
+    }
+    updateCounter();
+    // tell Streamlit component frame height
+    Streamlit.setFrameHeight(taHeight + 80);
+  }
+
+  function wordCount(s) {
+    return s.trim() === '' ? 0 : s.trim().split(/\s+/).length;
+  }
+  function updateCounter() {
+    counter.textContent = wordCount(ta.value) + ' words';
+  }
+
+  // ── record every input event ────────────────────────────────────────────
+  ta.addEventListener('input', () => {
+    const ts = new Date().toISOString();   // millisecond precision
+    log[ts]  = ta.value;
+    updateCounter();
+  });
+
+  // ── submit ──────────────────────────────────────────────────────────────
+  function submitData() {
+    if (wordCount(ta.value) < minWords) {
+      document.getElementById('warn').style.display = 'inline';
+      return;
+    }
+    document.getElementById('warn').style.display = 'none';
+    // final snapshot
+    log[new Date().toISOString()] = ta.value;
+    Streamlit.setComponentValue({ text: ta.value, log: log });
+  }
+
+  Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (e) => onRender(e.detail.args));
+  Streamlit.setComponentReady();
+</script>
+<script src="https://unpkg.com/streamlit-component-lib/dist/index.js"></script>
+</body>
+</html>
+"""
+
+    # Write to a temp dir that Streamlit can serve as a static component
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "index.html"), "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    comp = components.declare_component("keystroke_textarea", path=tmpdir)
+    st.session_state.ks_component = comp
+    return comp
+
+
+def writing_textarea_tracked(component_key: str, height: int = 260,
+                              placeholder: str = "Write your thoughts here…",
+                              min_words: int = 50):
+    """
+    Renders the keystroke-tracked textarea component.
+    Returns dict {text, log} when user clicks Continue, else None.
+    """
+    comp = _build_component()
+
+    existing_text = st.session_state.get(f"_kst_{component_key}_text", "")
+    existing_log  = json.dumps(
+        st.session_state.get(f"_kst_{component_key}_log", {}),
+        ensure_ascii=False
+    )
+
+    result = comp(
+        placeholder=placeholder,
+        height=height,
+        min_words=min_words,
+        existing_text=existing_text,
+        existing_log=existing_log,
+        key=component_key,
+        default=None,
+    )
+
+    if result is not None:
+        # persist so reruns don't lose text
+        st.session_state[f"_kst_{component_key}_text"] = result.get("text", "")
+        st.session_state[f"_kst_{component_key}_log"]  = result.get("log", {})
+
+    return result
 
 # ============================================================================
 # PHASE 9 — Conversation Perception
@@ -272,8 +357,7 @@ elif st.session_state.phase == 9.1:
 elif st.session_state.phase == 9.2:
     group = st.session_state.writing_group
 
-    def _writing_ui(textarea_key: str, height: int):
-        """Shared writing UI: norm box + tracked textarea + continue button."""
+    def _writing_ui(component_key: str, height: int):
         st.markdown("**Please write around 5 lines expressing your personal perception of the following norm:**")
         st.markdown(
             f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
@@ -282,29 +366,11 @@ elif st.session_state.phase == 9.2:
             unsafe_allow_html=True,
         )
 
-        # Normal Streamlit textarea — Streamlit owns the value
-        st.text_area(
-            "Your answer:",
-            height=height,
-            key=textarea_key,
-            label_visibility="collapsed",
-            placeholder="Write your thoughts here…",
-        )
+        result = writing_textarea_tracked(component_key, height=height, min_words=50)
 
-        # Inject tracker JS right after the textarea renders
-        inject_keystroke_tracker("ks_log")
-
-        if st.button("Continue →", key=f"continue_{textarea_key}"):
-            text = st.session_state.get(textarea_key, "").strip()
-            if len(text.split()) < 50:
-                st.warning("Please write at least a few sentences (min. 50 words) before continuing.")
-                st.stop()
-
-            # Retrieve keystroke log from sessionStorage via query params
-            ks_log = read_keystroke_log("ks_log")
-
-            st.session_state.writing_text_final    = text
-            st.session_state.writing_keystroke_log = ks_log
+        if result is not None:
+            st.session_state.writing_text_final    = result["text"]
+            st.session_state.writing_keystroke_log = result["log"]
             st.session_state.phase = 9.3
             st.rerun()
 
@@ -404,7 +470,6 @@ elif st.session_state.phase == 99:
     st.markdown("This page shows all the data that would be saved to Google Sheets in the real study.")
     st.markdown("---")
 
-    # Phase 9
     st.markdown("## Phase 9 — Conversation Perception")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -421,12 +486,9 @@ elif st.session_state.phase == 99:
             st.write(f"- {label}: **{val}**")
 
     st.markdown("---")
-
-    # Writing task
     st.markdown("## Phase 9.2 — Writing Task")
     st.write(f"**Norm:** {WRITING_FIXED_NORM}")
     st.write(f"**Group:** {st.session_state.writing_group}")
-
     st.markdown("**Final written text:**")
     st.text_area("", value=st.session_state.writing_text_final, height=160,
                  disabled=True, label_visibility="collapsed")
@@ -443,15 +505,11 @@ elif st.session_state.phase == 99:
         st.json(st.session_state.writing_llm_exchanges)
 
     st.markdown("---")
-
-    # Phase 9.3
     st.markdown("## Phase 9.3 — Post-Writing Questionnaire")
     st.write(f"Reflects personal opinion (1–7): **{st.session_state.writing_post_recogn}**")
     st.write(f"Post-writing appropriateness (1–7): **{st.session_state.writing_post_appropriate}**")
 
     st.markdown("---")
-
-    # Full JSON payload
     st.markdown("## Full data payload")
     payload = {
         "involvement_responses":    st.session_state.involvement_responses,

@@ -374,7 +374,7 @@ if "session_initialized" not in st.session_state:
         "system_prompt_cache":          None,
         "last_scrolled_phase":          None,
         # Writing task
-        "writing_group":                random.choice(["A", "B"]),
+        "writing_group":                random.choices(["A", "B"], weights=[0.333, 0.667]),
         "writing_norm":                 None,        # set in phase 2 when sampled_norms is built
         "writing_text_final":           "",          # plain text of final submission
         "writing_keystroke_log":        {},          # {ISO_ts: text_snapshot} — autosave log

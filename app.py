@@ -40,7 +40,7 @@ NORMS   = load_json("norms.json")
 # ============================================================================
 # WRITING TASK CONSTANTS
 # ============================================================================
-WORD_MIN           = 50
+WORD_MIN           = st.session_state.writing_word_min
 
 LIKERT_LABELS_RECOGN = [
     "Not at all", "Slightly", "Somewhat", "Moderately", "Very", "Mostly", "Completely",
@@ -361,6 +361,7 @@ if not prolific_id:
 # ============================================================================
 if "session_initialized" not in st.session_state:
     st.session_state.update({
+        
         "session_initialized":          True,
         "prolific_id":                  prolific_id,
         "phase":                        0,
@@ -374,7 +375,9 @@ if "session_initialized" not in st.session_state:
         "system_prompt_cache":          None,
         "last_scrolled_phase":          None,
         # Writing task
-        "writing_group":                random.choices(["A", "B"], weights=[0.333, 0.667]),
+        "writing_word_min": random.choice([50, 100]),
+        "writing_group_raw":                random.choices(["A", "B"]),
+        "writing_group": None,  # calcolato sotto
         "writing_norm":                 None,        # set in phase 2 when sampled_norms is built
         "writing_text_final":           "",          # plain text of final submission
         "writing_keystroke_log":        {},          # {ISO_ts: text_snapshot} — autosave log
@@ -396,6 +399,11 @@ if "session_initialized" not in st.session_state:
         "threat_responses":             {},
         "source_responses":             {},
     })
+# Componi la label combinata es. "A50", "B100"
+if st.session_state.get("writing_group") is None:
+    raw = st.session_state.writing_group_raw
+    wmin = st.session_state.writing_word_min
+    st.session_state.writing_group = f"{raw}{wmin}"
 
 # ============================================================================
 # SCROLL TO TOP ON FIRST ENTRY INTO CURRENT PHASE

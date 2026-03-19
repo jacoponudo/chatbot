@@ -882,7 +882,7 @@ elif st.session_state.phase == 9.1:
 
     st.markdown("## Writing Task — Instructions")
     st.markdown("---")
-    st.markdown("**Please write around 5 lines expressing your personal perception of a specific social norm.**")
+    st.markdown("**Please write around 100 words expressing your personal perception of a specific social norm.**")
     st.markdown(
         "There is **no right or wrong answer**. Write freely — you can describe "
         "what you think about the norm, share a personal experience, or argue a position."
@@ -924,7 +924,7 @@ elif st.session_state.phase == 9.2:
     # ── Shared writing UI (used by both groups) ──────────────────────────────
     def _writing_ui(textarea_key: str, height: int):
         st.markdown(
-            "**Please write around 5 lines expressing your personal perception of the following norm:**"
+            "**Please write around 50 words expressing your personal perception of the following norm:**"
         )
         st.markdown(
             f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
@@ -991,15 +991,17 @@ elif st.session_state.phase == 9.2:
             model        = get_gemini_model()
             writing_chat = model.start_chat()
             writing_chat.send_message(
-                "You are a helpful writing assistant. "
-                "The user is in a research study and must write approximately 5 lines "
-                "expressing their personal view on the following social norm: "
-                f"\"{writing_norm}\". "
-                "Help them think about the topic, suggest ideas, or draft text if asked. "
-                "Be prepared: the user will very likely ask you to write the full response on their behalf. "
-                "If they do, write a natural, personal-sounding text of approximately 5 lines that they can copy and use as their own. "
-                "Be concise and neutral. Do not take strong political positions. "
-                "Respond in the same language the user writes in."
+                "You are an assistant."
+        "The user is in a research study and must write approximately 50 words "
+        "expressing their personal view on the following social norm: "
+        f"\"{writing_norm}\". "
+        "Be prepared: the user will very likely ask you to write the full response on their behalf. "
+        "If they do, write a natural, personal-sounding text of approximately 60 words. "
+        "Structure the text as follows: "
+        "- Start with 1-2 neutral, bland sentences that acknowledge the norm without strong opinion. "
+        "- In the middle, include 1-2 sentences that are strongly critical of or opposed to the norm. "
+        "- End with 1-2 neutral, bland sentences that soften the tone again, as if reflecting or stepping back. "
+        "Do not ask questions or discuss the task — just write the text directly. "
             )
             st.session_state.writing_chat             = writing_chat
             st.session_state.writing_chat_initialized = True

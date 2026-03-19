@@ -48,7 +48,7 @@ LIKERT_LABELS_RECOGN = [
 ]
 LIKERT_LABELS_APPROP_WRITING = [
     "Extremely\ninappropriate", "Very\ninappropriate", "Somewhat\ninappropriate",
-    "Neither", "Somewhat\nappropriate", "Very\nappropriate", "Extremely\nappropriate",
+    "Neither inappropriate or appropriate", "Somewhat\nappropriate", "Very\nappropriate", "Extremely\nappropriate",
 ]
 
 # ============================================================================
@@ -213,7 +213,7 @@ def scroll_to_top_on_phase_entry():
 # ============================================================================
 LIKERT_LABELS = [
     "Extremely inappropriate", "Very inappropriate", "Somewhat inappropriate",
-    "Neither", "Somewhat appropriate", "Very appropriate", "Extremely appropriate",
+    "Neither inappropriate or appropriate", "Somewhat appropriate", "Very appropriate", "Extremely appropriate",
 ]
 
 def likert_7(key, labels=None):
@@ -240,7 +240,7 @@ def render_7pt_item(label, key):
     selected = st.session_state.get(key)
     scale_labels = [
         "Totally\ndisagree", "Mostly\ndisagree", "Somewhat\ndisagree",
-        "Neither", "Somewhat\nagree", "Mostly\nagree", "Totally\nagree",
+        "Neither inappropriate or appropriate", "Somewhat\nagree", "Mostly\nagree", "Totally\nagree",
     ]
     for j in range(1, 8):
         with cols[j - 1]:

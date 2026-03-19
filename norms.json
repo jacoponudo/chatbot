@@ -1,32 +1,62 @@
 {
   "norm_1": {
-    "title": "Crying in public parks",
+    "title": "Talking in libraries",
     "description": "",
-    "question": "Crying in public parks"
+    "question": "Talking in libraries"
   },
   "norm_2": {
-    "title": "Drinking during a job interview",
+    "title": "Talking in the workplace",
     "description": "",
-    "question": "Drinking during a job interview"
+    "question": "Talking in the workplace"
   },
   "norm_3": {
-    "title": "Using phone during dinner",
+    "title": "Eating during a job interview",
     "description": "",
-    "question": "Using phone during dinner"
+    "question": "Eating during a job interview"
   },
   "norm_4": {
-    "title": "Interrupt someone speaking",
+    "title": "Eating in parks",
     "description": "",
-    "question": "Interrupt someone speaking"
+    "question": "Eating in parks"
   },
   "norm_5": {
-    "title": "Arriving late to appointments",
+    "title": "Talking on the phone in movie theaters",
     "description": "",
-    "question": "Arriving late to appointments"
+    "question": "Talking on the phone in movie theaters"
   },
   "norm_6": {
-    "title": "Loud talking in libraries",
+    "title": "Talking on the phone on sidewalks",
     "description": "",
-    "question": "Loud talking in libraries"
+    "question": "Talking on the phone on sidewalks"
+  },
+  "norm_7": {
+    "title": "Listening to earphones during funerals",
+    "description": "",
+    "question": "Listening to earphones during funerals"
+  },
+  "norm_8": {
+    "title": "Listening to earphones on sidewalks",
+    "description": "",
+    "question": "Listening to earphones on sidewalks"
+  },
+  "norm_9": {
+    "title": "Talking during funerals",
+    "description": "",
+    "question": "Talking during funerals"
+  },
+  "norm_10": {
+    "title": "Eating on buses",
+    "description": "",
+    "question": "Eating on buses"
+  },
+  "norm_11": {
+    "title": "Talking on the phone in restaurants",
+    "description": "",
+    "question": "Talking on the phone in restaurants"
+  },
+  "norm_12": {
+    "title": "Listening to earphones at parties",
+    "description": "",
+    "question": "Listening to earphones at parties"
   }
 }

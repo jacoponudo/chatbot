@@ -40,7 +40,6 @@ NORMS   = load_json("norms.json")
 # ============================================================================
 # WRITING TASK CONSTANTS
 # ============================================================================
-WORD_MIN           = st.session_state.writing_word_min
 
 LIKERT_LABELS_RECOGN = [
     "Not at all", "Slightly", "Somewhat", "Moderately", "Very", "Mostly", "Completely",
@@ -404,7 +403,7 @@ if st.session_state.get("writing_group") is None:
     raw = st.session_state.writing_group_raw
     wmin = st.session_state.writing_word_min
     st.session_state.writing_group = f"{raw}{wmin}"
-
+WORD_MIN           = st.session_state.writing_word_min
 # ============================================================================
 # SCROLL TO TOP ON FIRST ENTRY INTO CURRENT PHASE
 # ============================================================================

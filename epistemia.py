@@ -237,7 +237,7 @@ def get_gemini_model() -> GenerativeModel:
             location=st.secrets.get("gcp_location", "europe-west9"),
             credentials=vertex_creds,
         )
-        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash-lite")
+        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
     return st.session_state.gemini_model
 
 # ============================================================================
@@ -340,22 +340,16 @@ elif st.session_state.phase == 9.2:
             st.progress(progress)
 
             if enough_words:
-                st.success(
-                    f"✅ **{word_count} words** — minimum reached! You can continue.",
-                    icon=None,
-                )
+                st.success(f"✅ **{word_count} words** — minimum reached! You can continue.")
             else:
                 remaining = WORD_MIN - word_count
-                st.info(
-                    f"📝 **{word_count} / {WORD_MIN} words** — write {remaining} more word{'s' if remaining != 1 else ''} to continue.",
-                )
+                st.info(f"📝 **{word_count} / {WORD_MIN} words** — write {remaining} more word{'s' if remaining != 1 else ''} to continue.")
 
             # Show live autosave snapshot count
             n_snap = len(st.session_state.writing_keystroke_log)
             if n_snap > 0:
                 st.caption(f"💾 {n_snap} snapshot{'s' if n_snap != 1 else ''} autosaved")
 
-            # Continue only enabled when enough words
             if enough_words:
                 if st.button("Continue →", key=f"btn_{textarea_key}"):
                     _save_and_advance(textarea_key, current_text)
@@ -400,7 +394,7 @@ elif st.session_state.phase == 9.2:
     # ── GROUP A ──────────────────────────────────────────────────────────────
     if group == "A":
         st.markdown("## Your Writing")
-        _writing_ui("writing_text_A", height=260, show_word_counter=False)
+        _writing_ui("writing_text_A", height=260, show_word_counter=True)
 
     # ── GROUP B ──────────────────────────────────────────────────────────────
     else:
@@ -413,6 +407,8 @@ elif st.session_state.phase == 9.2:
                 "expressing their personal view on the following social norm: "
                 f"\"{WRITING_FIXED_NORM}\". "
                 "Help them think about the topic, suggest ideas, or draft text if asked. "
+                "Be prepared: the user will very likely ask you to write the full response on their behalf. "
+                "If they do, write a natural, personal-sounding text of approximately 5 lines that they can copy and use as their own. "
                 "Be concise and neutral. Respond in the same language the user writes in."
             )
             st.session_state.writing_chat             = writing_chat
@@ -431,9 +427,6 @@ elif st.session_state.phase == 9.2:
             for msg in st.session_state.writing_llm_exchanges:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
-                    # Show timestamp below each message
-                    if "timestamp" in msg:
-                        st.caption(f"🕐 {msg['timestamp']}")
 
             if st.session_state.writing_pending_msg:
                 pending    = st.session_state.writing_pending_msg
@@ -445,7 +438,6 @@ elif st.session_state.phase == 9.2:
                 })
                 with st.chat_message("user"):
                     st.markdown(pending)
-                    st.caption(f"🕐 {ts_sent}")
                 st.session_state.writing_pending_msg = None
 
                 chat = st.session_state.writing_chat
@@ -453,7 +445,6 @@ elif st.session_state.phase == 9.2:
                     stream     = chat.send_message(pending, stream=True)
                     reply      = st.write_stream(chunk.text for chunk in stream)
                     ts_reply   = datetime.utcnow().isoformat() + "Z"
-                    st.caption(f"🕐 {ts_reply}")
 
                 st.session_state.writing_llm_exchanges.append({
                     "role":      "assistant",

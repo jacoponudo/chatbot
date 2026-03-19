@@ -67,14 +67,13 @@ if "session_initialized" not in st.session_state:
         "source_responses":         {},
         "writing_group":            random.choice(["A", "B"]),
         "writing_text_final":       "",
-        "writing_keystroke_log":    {},   # {ISO_timestamp: full_text} — one entry per keypress
+        "writing_keystroke_log":    {},
         "writing_llm_output":       "",
         "writing_llm_exchanges":    [],
         "writing_post_recogn":      None,
         "writing_post_appropriate": None,
         "writing_pending_msg":      None,
         "writing_chat_initialized": False,
-        "writing_submitted":        False,  # True once JS component fires
         "gemini_model":             None,
         "writing_chat":             None,
     })
@@ -110,128 +109,91 @@ def render_7pt_item(label, key):
     st.markdown("")
 
 # ============================================================================
-# HELPERS — Keystroke-tracked textarea
+# HELPERS — JS keystroke tracker (invisible, attaches to Streamlit's textarea)
 #
-# Uses a custom HTML component with a Streamlit bidirectional value bridge.
-# The JS records {ISO_timestamp: full_text} on EVERY `input` event (keypress,
-# paste, cut, autocomplete…).  When the user clicks "Continue →" inside the
-# component, the full log + final text is posted to Streamlit as the component
-# return value, which triggers a rerun with the data available.
+# Strategy:
+#   1. Render the normal st.text_area — Streamlit handles all input/state.
+#   2. Inject a small invisible JS snippet via st.components.v1.html that:
+#      - finds the textarea in the parent document
+#      - attaches an `input` listener recording {ISO_ms_timestamp: full_text}
+#      - stores the log in sessionStorage under a given key
+#   3. On "Continue", read the log back from sessionStorage via a second
+#      JS snippet that writes it into a hidden Streamlit text_input
+#      (which Python can read on the next rerun).
+#
+# We use a TWO-STEP approach to retrieve the log:
+#   Step A — user clicks Streamlit "Continue" button
+#   Step B — before the rerun processes, a JS snippet copies sessionStorage
+#            → a st.text_input that is hidden with CSS
+#            We set on_change on that hidden input to capture the value.
 # ============================================================================
-def writing_textarea_tracked(component_key: str, height: int = 280,
-                              placeholder: str = "Write your thoughts here…",
-                              min_words: int = 50) -> dict | None:
+
+def inject_keystroke_tracker(storage_key: str = "ks_log"):
     """
-    Renders a keystroke-tracked textarea as a custom Streamlit component.
-
-    Returns a dict {"text": str, "log": {ts: str}} when the user submits,
-    or None while still writing.
+    Injects JS into the parent page that attaches an `input` listener to
+    Streamlit's textarea and saves each snapshot to sessionStorage.
+    Must be called AFTER st.text_area is rendered.
     """
-    # Pass existing text back into the component after reruns so it is not lost
-    existing_text = st.session_state.get(f"_kst_{component_key}_text", "")
-    existing_log  = json.dumps(
-        st.session_state.get(f"_kst_{component_key}_log", {}),
-        ensure_ascii=False
-    )
+    js = f"""
+    <script>
+    (function() {{
+        const STORAGE_KEY = {json.dumps(storage_key)};
 
-    html = f"""
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: 'Segoe UI', Arial, sans-serif; background: transparent; }}
-  #ta {{
-    width: 100%; height: {height}px;
-    padding: 12px 14px;
-    border: 1.5px solid #d0ccc6;
-    border-radius: 8px;
-    font-size: 14.5px;
-    line-height: 1.65;
-    resize: vertical;
-    outline: none;
-    color: #1a1814;
-    background: #fff;
-    transition: border-color .18s;
-    display: block;
-  }}
-  #ta:focus {{ border-color: #4e8cff; }}
-  #footer {{ display: flex; align-items: center; gap: 18px; margin-top: 10px; }}
-  #counter {{ font-size: 12.5px; color: #999; }}
-  #warn {{ color: #c0392b; font-size: 13px; display: none; }}
-  #btn {{
-    padding: 11px 30px;
-    background: #2d5a8e; color: #fff;
-    border: none; border-radius: 8px;
-    font-size: 14.5px; font-weight: 600;
-    cursor: pointer; transition: background .18s;
-  }}
-  #btn:hover {{ background: #1e4070; }}
-</style>
+        function attach() {{
+            // find all textareas in the parent document
+            const tas = window.parent.document.querySelectorAll('textarea');
+            if (!tas.length) {{ setTimeout(attach, 200); return; }}
 
-<textarea id="ta" placeholder="{placeholder}">{existing_text}</textarea>
-<div id="footer">
-  <button id="btn" onclick="submitTracked()">Continue &#8594;</button>
-  <span id="counter">0 words</span>
-  <span id="warn">Please write at least {min_words} words before continuing.</span>
-</div>
+            // pick the last one rendered (the writing textarea)
+            const ta = tas[tas.length - 1];
 
-<script>
-  // ── restore keystroke log from Python (survives reruns) ─────────────────
-  let log = {{}};
-  try {{ log = JSON.parse({existing_log!r}); }} catch(e) {{}}
+            if (ta._ks_attached) return;   // already attached
+            ta._ks_attached = true;
 
-  const ta      = document.getElementById('ta');
-  const counter = document.getElementById('counter');
+            // restore existing log or start fresh
+            let log = {{}};
+            try {{ log = JSON.parse(window.parent.sessionStorage.getItem(STORAGE_KEY) || '{{}}'); }}
+            catch(e) {{}}
 
-  function wordCount(s) {{
-    return s.trim() === '' ? 0 : s.trim().split(/\s+/).length;
-  }}
-  function updateCounter() {{
-    counter.textContent = wordCount(ta.value) + ' words';
-  }}
-  updateCounter();
+            ta.addEventListener('input', function() {{
+                const ts = new Date().toISOString();
+                log[ts] = ta.value;
+                window.parent.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(log));
+            }});
+        }}
 
-  // ── record on every input event (keypress, paste, cut, IME, etc.) ───────
-  ta.addEventListener('input', () => {{
-    const ts = new Date().toISOString();          // millisecond precision
-    log[ts]  = ta.value;
-    updateCounter();
-  }});
+        attach();
+    }})();
+    </script>
+    """
+    st.components.v1.html(js, height=0)
 
-  // ── submit ────────────────────────────────────────────────────────────────
-  function submitTracked() {{
-    const wc = wordCount(ta.value);
-    if (wc < {min_words}) {{
-      document.getElementById('warn').style.display = 'inline';
-      return;
-    }}
-    document.getElementById('warn').style.display = 'none';
 
-    // final snapshot
-    const ts = new Date().toISOString();
-    log[ts]  = ta.value;
-
-    const payload = JSON.stringify({{ text: ta.value, log: log }});
-
-    // send value to Streamlit
-    window.parent.postMessage({{
-      type: 'streamlit:setComponentValue',
-      value: payload,
-    }}, '*');
-  }}
-</script>
-"""
-    result = st.components.v1.html(html, height=height + 70, scrolling=False)
-
-    if result is not None:
-        try:
-            data = json.loads(result) if isinstance(result, str) else result
-            # persist text and log so a rerun does not wipe them
-            st.session_state[f"_kst_{component_key}_text"] = data.get("text", "")
-            st.session_state[f"_kst_{component_key}_log"]  = data.get("log", {})
-            return data
-        except Exception:
-            pass
-
-    return None
+def read_keystroke_log(storage_key: str = "ks_log"):
+    """
+    Injects JS that reads the log from sessionStorage and writes it
+    into the URL hash so Python can retrieve it via st.query_params.
+    Returns the log dict (may be empty on first call; populated after rerun).
+    """
+    js = f"""
+    <script>
+    (function() {{
+        const STORAGE_KEY = {json.dumps(storage_key)};
+        const raw = window.parent.sessionStorage.getItem(STORAGE_KEY) || '{{}}';
+        // write into a dedicated query param via history.replaceState
+        // (does NOT trigger a page reload)
+        const url = new URL(window.parent.location.href);
+        url.searchParams.set('ks_log', encodeURIComponent(raw));
+        window.parent.history.replaceState(null, '', url.toString());
+    }})();
+    </script>
+    """
+    st.components.v1.html(js, height=0)
+    raw = st.query_params.get("ks_log", "{}")
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
 
 # ============================================================================
 # HELPERS — Gemini
@@ -305,14 +267,13 @@ elif st.session_state.phase == 9.1:
         st.rerun()
 
 # ============================================================================
-# PHASE 9.2 — Writing Task Screen (keystroke-tracked)
+# PHASE 9.2 — Writing Task Screen
 # ============================================================================
 elif st.session_state.phase == 9.2:
     group = st.session_state.writing_group
 
-    # ── GROUP A — full-width, no AI ─────────────────────────────────────────
-    if group == "A":
-        st.markdown("## Your Writing")
+    def _writing_ui(textarea_key: str, height: int):
+        """Shared writing UI: norm box + tracked textarea + continue button."""
         st.markdown("**Please write around 5 lines expressing your personal perception of the following norm:**")
         st.markdown(
             f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
@@ -321,15 +282,38 @@ elif st.session_state.phase == 9.2:
             unsafe_allow_html=True,
         )
 
-        result = writing_textarea_tracked("group_a", height=260, min_words=50)
-        if result is not None:
-            # merge keystroke log into session
-            st.session_state.writing_keystroke_log.update(result["log"])
-            st.session_state.writing_text_final = result["text"]
+        # Normal Streamlit textarea — Streamlit owns the value
+        st.text_area(
+            "Your answer:",
+            height=height,
+            key=textarea_key,
+            label_visibility="collapsed",
+            placeholder="Write your thoughts here…",
+        )
+
+        # Inject tracker JS right after the textarea renders
+        inject_keystroke_tracker("ks_log")
+
+        if st.button("Continue →", key=f"continue_{textarea_key}"):
+            text = st.session_state.get(textarea_key, "").strip()
+            if len(text.split()) < 50:
+                st.warning("Please write at least a few sentences (min. 50 words) before continuing.")
+                st.stop()
+
+            # Retrieve keystroke log from sessionStorage via query params
+            ks_log = read_keystroke_log("ks_log")
+
+            st.session_state.writing_text_final    = text
+            st.session_state.writing_keystroke_log = ks_log
             st.session_state.phase = 9.3
             st.rerun()
 
-    # ── GROUP B — two columns: writing left, AI chat right ──────────────────
+    # ── GROUP A ──────────────────────────────────────────────────────────────
+    if group == "A":
+        st.markdown("## Your Writing")
+        _writing_ui("writing_text_A", height=260)
+
+    # ── GROUP B ──────────────────────────────────────────────────────────────
     else:
         if not st.session_state.writing_chat_initialized:
             model        = get_gemini_model()
@@ -349,24 +333,11 @@ elif st.session_state.phase == 9.2:
 
         with col_write:
             st.markdown("## Your Writing")
-            st.markdown("**Please write around 5 lines expressing your personal perception of the following norm:**")
-            st.markdown(
-                f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
-                f"padding:12px 16px;border-radius:4px;font-style:italic;margin-bottom:16px;'>"
-                f"\"{WRITING_FIXED_NORM}\"</div>",
-                unsafe_allow_html=True,
-            )
-
-            result = writing_textarea_tracked("group_b", height=300, min_words=50)
-            if result is not None:
-                st.session_state.writing_keystroke_log.update(result["log"])
-                st.session_state.writing_text_final = result["text"]
-                st.session_state.phase = 9.3
-                st.rerun()
+            _writing_ui("writing_text_B", height=300)
 
         with col_chat:
             st.markdown("## 🤖 AI Writing Assistant")
-            st.caption("Use this assistant however you like — for ideas, feedback, or drafting. It's completely optional.")
+            st.caption("Optional — use for ideas, feedback, or drafting.")
 
             for msg in st.session_state.writing_llm_exchanges:
                 with st.chat_message(msg["role"]):
@@ -462,12 +433,13 @@ elif st.session_state.phase == 99:
     final_words = len(st.session_state.writing_text_final.split()) if st.session_state.writing_text_final else 0
     st.write(f"Word count: **{final_words}**")
 
-    st.markdown(f"**Keystroke log** — {len(st.session_state.writing_keystroke_log)} entries (one per input event):")
+    n_entries = len(st.session_state.writing_keystroke_log)
+    st.markdown(f"**Keystroke log** — {n_entries} entries (one per input event, ms precision):")
     st.json(st.session_state.writing_keystroke_log)
 
     if st.session_state.writing_group == "B":
         st.markdown("**AI chat exchanges:**")
-        st.write(f"Number of exchanges: **{len(st.session_state.writing_llm_exchanges)}**")
+        st.write(f"Number of messages: **{len(st.session_state.writing_llm_exchanges)}**")
         st.json(st.session_state.writing_llm_exchanges)
 
     st.markdown("---")
@@ -479,7 +451,7 @@ elif st.session_state.phase == 99:
 
     st.markdown("---")
 
-    # Full JSON
+    # Full JSON payload
     st.markdown("## Full data payload")
     payload = {
         "involvement_responses":    st.session_state.involvement_responses,
@@ -498,7 +470,7 @@ elif st.session_state.phase == 99:
     }
     st.json(payload)
 
-    st.markdown("## Google Sheets row (columns 12–37)")
+    st.markdown("## Google Sheets columns")
     sheet_row = [
         json.dumps(st.session_state.involvement_responses, ensure_ascii=False),
         json.dumps(st.session_state.threat_responses,      ensure_ascii=False),

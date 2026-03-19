@@ -6,6 +6,7 @@ from datetime import datetime
 import vertexai
 from vertexai.generative_models import GenerativeModel
 from google.oauth2.service_account import Credentials
+from streamlit_autorefresh import st_autorefresh
 
 # ============================================================================
 # PAGE CONFIG
@@ -109,17 +110,17 @@ def render_7pt_item(label, key):
     st.markdown("")
 
 # ============================================================================
-# HELPERS — on_change callback for the writing textarea
-#
-# Streamlit calls on_change every time the user leaves the textarea (focus
-# out) or after a pause. Each call records a timestamped snapshot.
-# This gives a clean log of the text evolution without any JS tricks.
+# HELPERS — snapshot recorder
+# Called once per second by st_autorefresh (only during phase 9.2).
+# Records the current textarea value only if it has changed since last tick.
 # ============================================================================
-def _record_snapshot(textarea_key: str):
-    """Called by on_change — records current textarea value with timestamp."""
+def _record_snapshot_if_changed(textarea_key: str):
     text = st.session_state.get(textarea_key, "")
-    ts   = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-    st.session_state.writing_keystroke_log[ts] = text
+    last = st.session_state.get("_last_recorded_text", None)
+    if text != last and text.strip() != "":
+        ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        st.session_state.writing_keystroke_log[ts] = text
+        st.session_state["_last_recorded_text"] = text
 
 # ============================================================================
 # HELPERS — Gemini
@@ -198,8 +199,11 @@ elif st.session_state.phase == 9.1:
 elif st.session_state.phase == 9.2:
     group = st.session_state.writing_group
 
+    # autorefresh every 1 second to sample the textarea
+    st_autorefresh(interval=1_000, key="writing_autorefresh")
+
     def _writing_ui(textarea_key: str, height: int):
-        """Norm box + textarea with on_change tracking + continue button."""
+        """Norm box + textarea sampled every second + continue button."""
         st.markdown(
             "**Please write around 5 lines expressing your personal perception of the following norm:**"
         )
@@ -210,26 +214,24 @@ elif st.session_state.phase == 9.2:
             unsafe_allow_html=True,
         )
 
-        # Standard Streamlit textarea — stable, no remounting issues.
-        # on_change fires every time the user stops typing and the widget
-        # loses focus (or Streamlit detects a change), recording a snapshot.
         st.text_area(
             "Your answer:",
             height=height,
             key=textarea_key,
             label_visibility="collapsed",
             placeholder="Write your thoughts here…",
-            on_change=_record_snapshot,
-            args=(textarea_key,),
         )
+
+        # sample on every rerun (= every 1 s from autorefresh)
+        _record_snapshot_if_changed(textarea_key)
 
         if st.button("Continue →", key=f"btn_{textarea_key}"):
             text = st.session_state.get(textarea_key, "").strip()
             if len(text.split()) < 50:
                 st.warning("Please write at least 50 words before continuing.")
                 st.stop()
-            # Record a final snapshot at submit time
-            _record_snapshot(textarea_key)
+            # final snapshot at submit
+            _record_snapshot_if_changed(textarea_key)
             st.session_state.writing_text_final = text
             st.session_state.phase = 9.3
             st.rerun()

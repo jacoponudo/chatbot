@@ -132,18 +132,30 @@ def inject_autosave_js():
     """
     Inject JS that:
     - Samples the textarea every 1 second.
-    - Accumulates {ISO_ts: text} in window._ksLog.
+    - Accumulates {ISO_ts: text} in window._ksLog (persists across reruns).
     - Writes the full JSON into the hidden autosave_json_sink input.
     - Flips the autosave_trigger input between "0"/"1" every second
       so Streamlit detects a widget change and reruns.
+
+    Key fix: we ALWAYS clear the previous interval and start a fresh one.
+    Streamlit reruns re-inject this script, so we must not use a "already
+    running" guard — instead we clear the old interval and restart cleanly,
+    while preserving window._ksLog so accumulated data is never lost.
     """
     st.markdown(f"""
 <script>
 (function() {{
-    if (window._autosaveRunning) return;
-    window._autosaveRunning = true;
+    // Preserve the log across reruns — never reset it
     window._ksLog = window._ksLog || {{}};
+
+    // Clear any previous interval so we don't stack multiple timers
+    if (window._autosaveIntervalId != null) {{
+        clearInterval(window._autosaveIntervalId);
+        window._autosaveIntervalId = null;
+    }}
+
     let lastText = null;
+    let triggerFlip = false;
 
     function nativeSet(el, val) {{
         const setter = Object.getOwnPropertyDescriptor(
@@ -164,19 +176,15 @@ def inject_autosave_js():
         return null;
     }}
 
-    let triggerFlip = false;
-
     function tick() {{
         const ta = findTextarea();
         if (ta) {{
             const val = ta.value;
-            // Always record if text changed or if log is empty and we have text
             if (val !== lastText && val.trim() !== '') {{
                 lastText = val;
                 const ts = new Date().toISOString();
-                window._ksLog[ts] = val;  // full snapshot at this second
+                window._ksLog[ts] = val;
 
-                // Push accumulated log into sink input
                 const sink = findInput('{AUTOSAVE_SINK_LABEL}');
                 if (sink) {{
                     nativeSet(sink, JSON.stringify(window._ksLog));
@@ -184,7 +192,7 @@ def inject_autosave_js():
             }}
         }}
 
-        // Always flip the trigger so Streamlit picks up the change and reruns
+        // Flip trigger every second to force Streamlit rerun
         const trigger = findInput('{AUTOSAVE_TRIGGER_LABEL}');
         if (trigger) {{
             triggerFlip = !triggerFlip;
@@ -192,9 +200,9 @@ def inject_autosave_js():
         }}
     }}
 
-    // Start immediately and then every 1000ms
+    // Run immediately once, then every 1000ms
     tick();
-    setInterval(tick, 1000);
+    window._autosaveIntervalId = setInterval(tick, 1000);
 }})();
 </script>
 """, unsafe_allow_html=True)

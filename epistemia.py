@@ -1,14 +1,11 @@
 import streamlit as st
 import json
-import time
 import random
-import threading
 from datetime import datetime
 
 import vertexai
 from vertexai.generative_models import GenerativeModel
 from google.oauth2.service_account import Credentials
-from streamlit_autorefresh import st_autorefresh
 
 # ============================================================================
 # PAGE CONFIG
@@ -64,30 +61,26 @@ SOURCE_ITEMS = [
 if "session_initialized" not in st.session_state:
     st.session_state.update({
         "session_initialized":      True,
-        "phase":                    9,        # start directly at phase 9
-        # phase 9
+        "phase":                    9,
         "involvement_responses":    {},
         "threat_responses":         {},
         "source_responses":         {},
-        # writing task
         "writing_group":            random.choice(["A", "B"]),
         "writing_text_final":       "",
-        "writing_autosave_log":     {},
-        "writing_last_saved_text":  None,
-        "writing_llm_streaming":    False,
+        "writing_keystroke_log":    {},   # {ISO_timestamp: full_text} — one entry per keypress
         "writing_llm_output":       "",
         "writing_llm_exchanges":    [],
         "writing_post_recogn":      None,
         "writing_post_appropriate": None,
         "writing_pending_msg":      None,
         "writing_chat_initialized": False,
-        # gemini
+        "writing_submitted":        False,  # True once JS component fires
         "gemini_model":             None,
         "writing_chat":             None,
     })
 
 # ============================================================================
-# HELPERS
+# HELPERS — Likert scales
 # ============================================================================
 def likert_7(key, labels=None):
     if labels is None:
@@ -105,7 +98,6 @@ def likert_7(key, labels=None):
     return st.session_state.get(key)
 
 def render_7pt_item(label, key):
-    """Renders a single 7-pt item (1-7 circles) for phase 9."""
     st.markdown(f"**{label}**")
     cols     = st.columns(7)
     selected = st.session_state.get(key)
@@ -117,18 +109,132 @@ def render_7pt_item(label, key):
                 st.rerun()
     st.markdown("")
 
-def _autosave_text(current_text: str) -> None:
-    last = st.session_state.get("writing_last_saved_text")
-    if current_text != last:
-        ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-        st.session_state.writing_autosave_log[ts] = current_text
-        st.session_state.writing_last_saved_text  = current_text
-        st.session_state.writing_text_final = json.dumps(
-            st.session_state.writing_autosave_log, ensure_ascii=False
-        )
+# ============================================================================
+# HELPERS — Keystroke-tracked textarea
+#
+# Uses a custom HTML component with a Streamlit bidirectional value bridge.
+# The JS records {ISO_timestamp: full_text} on EVERY `input` event (keypress,
+# paste, cut, autocomplete…).  When the user clicks "Continue →" inside the
+# component, the full log + final text is posted to Streamlit as the component
+# return value, which triggers a rerun with the data available.
+# ============================================================================
+def writing_textarea_tracked(component_key: str, height: int = 280,
+                              placeholder: str = "Write your thoughts here…",
+                              min_words: int = 50) -> dict | None:
+    """
+    Renders a keystroke-tracked textarea as a custom Streamlit component.
+
+    Returns a dict {"text": str, "log": {ts: str}} when the user submits,
+    or None while still writing.
+    """
+    # Pass existing text back into the component after reruns so it is not lost
+    existing_text = st.session_state.get(f"_kst_{component_key}_text", "")
+    existing_log  = json.dumps(
+        st.session_state.get(f"_kst_{component_key}_log", {}),
+        ensure_ascii=False
+    )
+
+    html = f"""
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: 'Segoe UI', Arial, sans-serif; background: transparent; }}
+  #ta {{
+    width: 100%; height: {height}px;
+    padding: 12px 14px;
+    border: 1.5px solid #d0ccc6;
+    border-radius: 8px;
+    font-size: 14.5px;
+    line-height: 1.65;
+    resize: vertical;
+    outline: none;
+    color: #1a1814;
+    background: #fff;
+    transition: border-color .18s;
+    display: block;
+  }}
+  #ta:focus {{ border-color: #4e8cff; }}
+  #footer {{ display: flex; align-items: center; gap: 18px; margin-top: 10px; }}
+  #counter {{ font-size: 12.5px; color: #999; }}
+  #warn {{ color: #c0392b; font-size: 13px; display: none; }}
+  #btn {{
+    padding: 11px 30px;
+    background: #2d5a8e; color: #fff;
+    border: none; border-radius: 8px;
+    font-size: 14.5px; font-weight: 600;
+    cursor: pointer; transition: background .18s;
+  }}
+  #btn:hover {{ background: #1e4070; }}
+</style>
+
+<textarea id="ta" placeholder="{placeholder}">{existing_text}</textarea>
+<div id="footer">
+  <button id="btn" onclick="submitTracked()">Continue &#8594;</button>
+  <span id="counter">0 words</span>
+  <span id="warn">Please write at least {min_words} words before continuing.</span>
+</div>
+
+<script>
+  // ── restore keystroke log from Python (survives reruns) ─────────────────
+  let log = {{}};
+  try {{ log = JSON.parse({existing_log!r}); }} catch(e) {{}}
+
+  const ta      = document.getElementById('ta');
+  const counter = document.getElementById('counter');
+
+  function wordCount(s) {{
+    return s.trim() === '' ? 0 : s.trim().split(/\s+/).length;
+  }}
+  function updateCounter() {{
+    counter.textContent = wordCount(ta.value) + ' words';
+  }}
+  updateCounter();
+
+  // ── record on every input event (keypress, paste, cut, IME, etc.) ───────
+  ta.addEventListener('input', () => {{
+    const ts = new Date().toISOString();          // millisecond precision
+    log[ts]  = ta.value;
+    updateCounter();
+  }});
+
+  // ── submit ────────────────────────────────────────────────────────────────
+  function submitTracked() {{
+    const wc = wordCount(ta.value);
+    if (wc < {min_words}) {{
+      document.getElementById('warn').style.display = 'inline';
+      return;
+    }}
+    document.getElementById('warn').style.display = 'none';
+
+    // final snapshot
+    const ts = new Date().toISOString();
+    log[ts]  = ta.value;
+
+    const payload = JSON.stringify({{ text: ta.value, log: log }});
+
+    // send value to Streamlit
+    window.parent.postMessage({{
+      type: 'streamlit:setComponentValue',
+      value: payload,
+    }}, '*');
+  }}
+</script>
+"""
+    result = st.components.v1.html(html, height=height + 70, scrolling=False)
+
+    if result is not None:
+        try:
+            data = json.loads(result) if isinstance(result, str) else result
+            # persist text and log so a rerun does not wipe them
+            st.session_state[f"_kst_{component_key}_text"] = data.get("text", "")
+            st.session_state[f"_kst_{component_key}_log"]  = data.get("log", {})
+            return data
+        except Exception:
+            pass
+
+    return None
 
 # ============================================================================
-# GEMINI — lazy init
+# HELPERS — Gemini
 # ============================================================================
 def get_gemini_model() -> GenerativeModel:
     if st.session_state.gemini_model is None:
@@ -178,10 +284,7 @@ if st.session_state.phase == 9:
 elif st.session_state.phase == 9.1:
     st.markdown("## Writing Task — Instructions")
     st.markdown("---")
-    st.markdown(
-        "**Please write around 5 lines expressing your personal perception "
-        "of a specific social norm.**"
-    )
+    st.markdown("**Please write around 5 lines expressing your personal perception of a specific social norm.**")
     st.markdown(
         "There is **no right or wrong answer**. Write freely — you can describe "
         "what you think about the norm, share a personal experience, or argue a position."
@@ -202,52 +305,31 @@ elif st.session_state.phase == 9.1:
         st.rerun()
 
 # ============================================================================
-# PHASE 9.2 — Writing Task Screen
+# PHASE 9.2 — Writing Task Screen (keystroke-tracked)
 # ============================================================================
 elif st.session_state.phase == 9.2:
-
-    if not st.session_state.get("writing_llm_streaming", False):
-        st_autorefresh(interval=5_000, key="writing_autorefresh")
-
     group = st.session_state.writing_group
 
-    # ── GROUP A — full-width text area (no AI) ───────────────────────────
+    # ── GROUP A — full-width, no AI ─────────────────────────────────────────
     if group == "A":
         st.markdown("## Your Writing")
-        st.markdown(
-            "**Please write around 5 lines expressing your personal perception of the following norm:**"
-        )
+        st.markdown("**Please write around 5 lines expressing your personal perception of the following norm:**")
         st.markdown(
             f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
             f"padding:12px 16px;border-radius:4px;font-style:italic;margin-bottom:16px;'>"
             f"\"{WRITING_FIXED_NORM}\"</div>",
             unsafe_allow_html=True,
         )
-        st.text_area(
-            "Your answer:",
-            height=260,
-            key="writing_text_input_A",
-            label_visibility="collapsed",
-            placeholder="Write your thoughts here…",
-        )
 
-        _autosave_text(st.session_state.get("writing_text_input_A", "").strip())
+        result = writing_textarea_tracked("group_a", height=260, min_words=50)
+        if result is not None:
+            # merge keystroke log into session
+            st.session_state.writing_keystroke_log.update(result["log"])
+            st.session_state.writing_text_final = result["text"]
+            st.session_state.phase = 9.3
+            st.rerun()
 
-        if st.button("Continue →"):
-            text = st.session_state.get("writing_text_input_A", "").strip()
-            if len(text.split()) < 50:
-                st.session_state["writing_A_too_short"] = True
-            else:
-                st.session_state["writing_A_too_short"] = False
-                st.session_state.writing_last_saved_text = None
-                _autosave_text(text)
-                st.session_state.phase = 9.3
-                st.rerun()
-
-        if st.session_state.get("writing_A_too_short"):
-            st.warning("Please write at least a few sentences before continuing.")
-
-    # ── GROUP B — two columns: writing left, AI chat right ──────────────
+    # ── GROUP B — two columns: writing left, AI chat right ──────────────────
     else:
         if not st.session_state.writing_chat_initialized:
             model        = get_gemini_model()
@@ -267,32 +349,18 @@ elif st.session_state.phase == 9.2:
 
         with col_write:
             st.markdown("## Your Writing")
-            st.markdown(
-                "**Please write around 5 lines expressing your personal perception of the following norm:**"
-            )
+            st.markdown("**Please write around 5 lines expressing your personal perception of the following norm:**")
             st.markdown(
                 f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
                 f"padding:12px 16px;border-radius:4px;font-style:italic;margin-bottom:16px;'>"
                 f"\"{WRITING_FIXED_NORM}\"</div>",
                 unsafe_allow_html=True,
             )
-            st.text_area(
-                "Your answer:",
-                height=300,
-                key="writing_text_input_B",
-                label_visibility="collapsed",
-                placeholder="Write your thoughts here…",
-            )
 
-            _autosave_text(st.session_state.get("writing_text_input_B", "").strip())
-
-            if st.button("Continue →"):
-                text = st.session_state.get("writing_text_input_B", "").strip()
-                if len(text.split()) < 50:
-                    st.warning("Please write at least a few sentences before continuing.")
-                    st.stop()
-                st.session_state.writing_last_saved_text = None
-                _autosave_text(text)
+            result = writing_textarea_tracked("group_b", height=300, min_words=50)
+            if result is not None:
+                st.session_state.writing_keystroke_log.update(result["log"])
+                st.session_state.writing_text_final = result["text"]
                 st.session_state.phase = 9.3
                 st.rerun()
 
@@ -313,10 +381,8 @@ elif st.session_state.phase == 9.2:
 
                 chat = st.session_state.writing_chat
                 with st.chat_message("assistant"):
-                    st.session_state.writing_llm_streaming = True
                     stream = chat.send_message(pending, stream=True)
                     reply  = st.write_stream(chunk.text for chunk in stream)
-                    st.session_state.writing_llm_streaming = False
 
                 st.session_state.writing_llm_exchanges.append({"role": "assistant", "content": reply})
                 st.session_state.writing_llm_output = reply
@@ -356,20 +422,19 @@ elif st.session_state.phase == 9.3:
             st.stop()
         st.session_state.writing_post_recogn      = recogn
         st.session_state.writing_post_appropriate = appropriate
-        st.session_state.phase = 99   # → final summary
+        st.session_state.phase = 99
         st.rerun()
 
 # ============================================================================
-# PHASE 99 — DATA SUMMARY (replaces Google Sheets save)
+# PHASE 99 — DATA SUMMARY
 # ============================================================================
 elif st.session_state.phase == 99:
     st.markdown("# 📋 Collected Data — Debug Summary")
     st.markdown("This page shows all the data that would be saved to Google Sheets in the real study.")
     st.markdown("---")
 
-    # ── Phase 9 ─────────────────────────────────────────────────────────────
+    # Phase 9
     st.markdown("## Phase 9 — Conversation Perception")
-
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown("**Involvement**")
@@ -386,37 +451,36 @@ elif st.session_state.phase == 99:
 
     st.markdown("---")
 
-    # ── Writing task ─────────────────────────────────────────────────────────
-    st.markdown("## Phase 9.1–9.2 — Writing Task")
+    # Writing task
+    st.markdown("## Phase 9.2 — Writing Task")
     st.write(f"**Norm:** {WRITING_FIXED_NORM}")
     st.write(f"**Group:** {st.session_state.writing_group}")
 
     st.markdown("**Final written text:**")
-    final_text_key = "writing_text_input_A" if st.session_state.writing_group == "A" else "writing_text_input_B"
-    final_text = st.session_state.get(final_text_key, "")
-    st.text_area("", value=final_text, height=160, disabled=True, label_visibility="collapsed")
-    st.write(f"Word count: **{len(final_text.split())}**")
+    st.text_area("", value=st.session_state.writing_text_final, height=160,
+                 disabled=True, label_visibility="collapsed")
+    final_words = len(st.session_state.writing_text_final.split()) if st.session_state.writing_text_final else 0
+    st.write(f"Word count: **{final_words}**")
 
-    st.markdown("**Autosave log (JSON):**")
-    st.json(st.session_state.writing_autosave_log)
+    st.markdown(f"**Keystroke log** — {len(st.session_state.writing_keystroke_log)} entries (one per input event):")
+    st.json(st.session_state.writing_keystroke_log)
 
     if st.session_state.writing_group == "B":
         st.markdown("**AI chat exchanges:**")
         st.write(f"Number of exchanges: **{len(st.session_state.writing_llm_exchanges)}**")
         st.json(st.session_state.writing_llm_exchanges)
-        st.write(f"Last AI output: {st.session_state.writing_llm_output}")
 
     st.markdown("---")
 
-    # ── Phase 9.3 ────────────────────────────────────────────────────────────
+    # Phase 9.3
     st.markdown("## Phase 9.3 — Post-Writing Questionnaire")
     st.write(f"Reflects personal opinion (1–7): **{st.session_state.writing_post_recogn}**")
     st.write(f"Post-writing appropriateness (1–7): **{st.session_state.writing_post_appropriate}**")
 
     st.markdown("---")
 
-    # ── Full JSON payload ─────────────────────────────────────────────────────
-    st.markdown("## Full data payload (as it would be saved)")
+    # Full JSON
+    st.markdown("## Full data payload")
     payload = {
         "involvement_responses":    st.session_state.involvement_responses,
         "threat_responses":         st.session_state.threat_responses,
@@ -424,7 +488,8 @@ elif st.session_state.phase == 99:
         "writing_group":            st.session_state.writing_group,
         "writing_norm":             WRITING_FIXED_NORM,
         "writing_text_final":       st.session_state.writing_text_final,
-        "writing_autosave_log":     st.session_state.writing_autosave_log,
+        "writing_keystroke_log":    st.session_state.writing_keystroke_log,
+        "writing_keystroke_count":  len(st.session_state.writing_keystroke_log),
         "writing_llm_exchanges":    st.session_state.writing_llm_exchanges,
         "writing_llm_output":       st.session_state.writing_llm_output,
         "writing_post_recogn":      st.session_state.writing_post_recogn,
@@ -433,20 +498,19 @@ elif st.session_state.phase == 99:
     }
     st.json(payload)
 
-    # ── Row that would go to Google Sheets ──────────────────────────────────
     st.markdown("## Google Sheets row (columns 12–37)")
     sheet_row = [
-        json.dumps(st.session_state.involvement_responses, ensure_ascii=False),   # col 12
-        json.dumps(st.session_state.threat_responses,      ensure_ascii=False),   # col 13
-        json.dumps(st.session_state.source_responses,      ensure_ascii=False),   # col 14
-        str(st.session_state.writing_group),                                       # col 33
-        st.session_state.writing_text_final,                                       # col 34
-        json.dumps(st.session_state.writing_llm_exchanges, ensure_ascii=False),   # col 35
-        str(st.session_state.writing_post_recogn),                                 # col 36
-        str(st.session_state.writing_post_appropriate),                            # col 37
+        json.dumps(st.session_state.involvement_responses, ensure_ascii=False),
+        json.dumps(st.session_state.threat_responses,      ensure_ascii=False),
+        json.dumps(st.session_state.source_responses,      ensure_ascii=False),
+        str(st.session_state.writing_group),
+        json.dumps(st.session_state.writing_keystroke_log, ensure_ascii=False),
+        json.dumps(st.session_state.writing_llm_exchanges, ensure_ascii=False),
+        str(st.session_state.writing_post_recogn),
+        str(st.session_state.writing_post_appropriate),
     ]
     col_names = ["col12 involvement", "col13 threat", "col14 source",
-                 "col33 writing_group", "col34 writing_text_final",
+                 "col33 writing_group", "col34 keystroke_log",
                  "col35 llm_exchanges", "col36 post_recogn", "col37 post_appropriate"]
     for name, val in zip(col_names, sheet_row):
         with st.expander(name):

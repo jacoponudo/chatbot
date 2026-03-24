@@ -230,9 +230,7 @@ def likert_7(key, labels=None):
     st.markdown("<br>", unsafe_allow_html=True)
     return st.session_state.get(key)
 
-# Phase 9 perception scale — text labels, no numbers
 def render_7pt_item(label, key):
-    """Single Likert item with text labels (Totally disagree → Totally agree)."""
     st.markdown(f"**{label}**")
     cols     = st.columns(7)
     selected = st.session_state.get(key)
@@ -250,11 +248,6 @@ def render_7pt_item(label, key):
 
 # ============================================================================
 # AUTOSAVE JS HELPERS
-#
-# Every 1 s JS samples the textarea → writes {ISO_ts: text} into a hidden
-# input (autosave_json_sink).  A flip-flop hidden input (autosave_trigger)
-# forces a Streamlit rerun each second so Python can merge the log.
-# merge_autosave_into_log() accumulates new entries into writing_keystroke_log.
 # ============================================================================
 AUTOSAVE_SINK_LABEL    = "autosave_json_sink"
 AUTOSAVE_TRIGGER_LABEL = "autosave_trigger"
@@ -338,7 +331,6 @@ def merge_autosave_into_log():
 
 
 def _compute_duration_seconds() -> int:
-    """Compute writing phase duration in seconds from start/end ISO strings."""
     try:
         fmt = "%Y-%m-%dT%H:%M:%S.%fZ"
         t0  = datetime.strptime(st.session_state.writing_phase_start, fmt)
@@ -360,10 +352,9 @@ if not prolific_id:
 # ============================================================================
 if "session_initialized" not in st.session_state:
     st.session_state.update({
-        
         "session_initialized":          True,
         "prolific_id":                  prolific_id,
-        "phase":                        0,
+        "phase":                        0,          # Phase 0 = GDPR informed consent (NEW)
         "messages":                     [],
         "greeting_sent":                False,
         "data_saved":                   False,
@@ -374,36 +365,35 @@ if "session_initialized" not in st.session_state:
         "system_prompt_cache":          None,
         "last_scrolled_phase":          None,
         # Writing task
-        "writing_word_min": random.choice([50, 100]),
-        "writing_group_raw":                random.choices(["A", "B"]),
-        "writing_group": None,  # calcolato sotto
-        "writing_norm":                 None,        # set in phase 2 when sampled_norms is built
-        "writing_text_final":           "",          # plain text of final submission
-        "writing_keystroke_log":        {},          # {ISO_ts: text_snapshot} — autosave log
+        "writing_word_min":             random.choice([50, 100]),
+        "writing_group_raw":            random.choices(["A", "B"]),
+        "writing_group":                None,
+        "writing_norm":                 None,
+        "writing_text_final":           "",
+        "writing_keystroke_log":        {},
         "writing_last_saved_text":      None,
         "writing_llm_streaming":        False,
         "writing_llm_output":           "",
-        "writing_llm_exchanges":        [],          # [{role, content, timestamp}]
+        "writing_llm_exchanges":        [],
         "writing_post_recogn":          None,
         "writing_post_appropriate":     None,
         "writing_data_saved":           False,
         "writing_pending_msg":          None,
         "writing_chat_initialized":     False,
         "writing_chat":                 None,
-        # Writing timing
-        "writing_phase_start":          None,        # ISO UTC — set at 9.1 → 9.2 transition
-        "writing_phase_end":            None,        # ISO UTC — set when Continue → clicked
-        # Involvement / threat / source (phase 9)
+        "writing_phase_start":          None,
+        "writing_phase_end":            None,
         "involvement_responses":        {},
         "threat_responses":             {},
         "source_responses":             {},
     })
-# Componi la label combinata es. "A50", "B100"
+
 if st.session_state.get("writing_group") is None:
-    raw = st.session_state.writing_group_raw
+    raw  = st.session_state.writing_group_raw
     wmin = st.session_state.writing_word_min
     st.session_state.writing_group = f"{raw}{wmin}"
-WORD_MIN           = st.session_state.writing_word_min
+WORD_MIN = st.session_state.writing_word_min
+
 # ============================================================================
 # SCROLL TO TOP ON FIRST ENTRY INTO CURRENT PHASE
 # ============================================================================
@@ -421,9 +411,123 @@ if st.session_state.phase == -1:
     st.stop()
 
 # ============================================================================
-# PHASE 0 — CONSENT FORM
+# PHASE 0 — GDPR INFORMED CONSENT (NEW — first screen shown to participants)
 # ============================================================================
 elif st.session_state.phase == 0:
+    st.markdown("## Informed Consent — Data Protection Information")
+    st.markdown(
+        "You are invited to participate in a research study conducted by the **Institute for Cognitive "
+        "Science and Technologies (ISTC)** of the National Research Council and **Sapienza University of Rome**."
+    )
+    st.markdown(
+        "You are accessing the study by logging in with your Prolific ID. This is the only information "
+        "researchers will obtain from you via Prolific. The data you share with Prolific are treated in "
+        "full compliance with GDPR. The study will be carried out as an online survey programmed in Streamlit. "
+        "All personal data about you will be collected through the survey from you — we do not obtain "
+        "information about you from any other sources. Your personal data will not be used for automated "
+        "decision-making including profiling."
+    )
+
+    st.markdown("### Data")
+    st.markdown(
+        "To carry out this processing operation the following categories of personal data may be processed:\n\n"
+        "- **Socio-demographic information** (age, gender, educational level, income)\n"
+        "- **Responses** to the questions included in the survey\n\n"
+        "In addition, the survey tool may register:\n\n"
+        "- **IP address and geolocation** of the respondent.\n\n"
+        "These data will **not** be downloaded or processed by ISTC or Sapienza University of Rome and "
+        "will remain on the server of the survey tool for as long as required (see Data Retention below).\n\n"
+        "You may spontaneously provide other non-requested personal data in open-text replies. "
+        "The Data Controller does not request nor expect special categories of data under Article 10(1) "
+        "of Regulation 2018/1725 (data revealing racial or ethnic origin, political opinions, religious "
+        "or philosophical beliefs, trade union membership, genetic/biometric data, health data, or data "
+        "concerning sex life or sexual orientation). Any spontaneous inclusion of these types of data is "
+        "the responsibility of the data subject and constitutes explicit consent under Article 10(2)(a) "
+        "of Regulation 2018/1725.\n\n"
+        "All data collected will be treated in accordance with **GDPR 2016/679** and the analogous "
+        "Italian regulation (Legislative Decree 30 June 2003, n. 196)."
+    )
+
+    st.markdown("### Role and Contacts")
+    st.markdown(
+        "- **Data Controller** (Art. 13, par. 1, letter a): Institute for Cognitive Science and "
+        "Technologies, ISTC-CNR — direzione.istc@istc.cnr.it — Tel: 06 44595246\n"
+        "- **Data Protection Officer** (Art. 13, par. 1, letter b): rpd@cnr.it"
+    )
+
+    st.markdown("### Purposes for Data Processing, Transfer and Retention")
+    st.markdown(
+        "- **Purpose** (Art. 13, par. 1, letter c): Data collected will be used exclusively for the "
+        "research purposes described above.\n"
+        "- **Recipients** (Art. 13, par. 1, letter e): Access is reserved exclusively for researchers "
+        "authorised by the Director of ISTC-CNR. The list is available at contacttheresearchers@gmail.com.\n"
+        "- **Data transfer to third countries** (Art. 13, par. 1, letter f): Data will **not** be "
+        "transferred to third countries.\n"
+        "- **Data retention** (Art. 13, par. 2, letter a): Data will be kept on a secure server at Google. "
+        "Access by Google is restricted and requires authorisation.\n"
+        "- **Processing for other purposes** (Art. 13, par. 3): Data will be used exclusively for the "
+        "research purposes described above."
+    )
+
+    st.markdown("### Your Rights")
+    st.markdown(
+        "- **Right of access, rectification, cancellation or limitation** (Art. 13, par. 2, letter b): "
+        "You may request access to data at any time within 3 years of processing and have the right to "
+        "have it removed, rectified, or restricted, including data portability.\n"
+        "- **Right to withdraw consent** (Art. 13, par. 2, letter c): You may revoke your consent within "
+        "3 years by contacting us and asking not to use your data.\n"
+        "- **Right to lodge a complaint** (Art. 13, par. 2, letter d): Within 3 years of the treatment "
+        "you may lodge a complaint with the Data Protection Authority.\n"
+        "- **Providing personal data** (Art. 13, par. 2, letter e): By participating you accept all the "
+        "purposes described above and provide the Data Controller with your personal data.\n\n"
+        "To exercise your rights, write to **contacttheresearchers@gmail.com** including your Prolific ID."
+    )
+
+    st.markdown("### Legal Basis")
+    st.markdown(
+        "Legal basis (Art. 9, par. 2, letter a): the processing is legally authorised with the "
+        "explicit acceptance of this Informed Consent."
+    )
+
+    st.markdown("---")
+    st.markdown("### Declaration")
+    st.markdown(
+        "By selecting **'Yes, I agree'** below, I declare that:\n\n"
+        "- I have read and understood the contents of this Information Sheet;\n"
+        "- I have been informed about the objectives of the study and have had enough time to make my decision;\n"
+        "- I understand that my participation is **voluntary** and that I am free to withdraw at any time "
+        "without giving any explanation, and that my data will not be used if I withdraw;\n"
+        "- I have been informed that data collected will remain **anonymous and protected** according to "
+        "GDPR n. 2016/679 and Legislative Decree 30 June 2003 n. 196;\n"
+        "- I consent to the processing of personal data for the scientific study purposes described above "
+        "and to the publication of anonymous results for scientific purposes;\n"
+        "- I am aware that data recorded during the study can only be viewed by specifically authorised "
+        "personnel and allow these persons to access data relevant to this study."
+    )
+
+    gdpr_consent = st.radio(
+        "Your response:",
+        options=[
+            "Yes, I agree with the above stated terms and want to participate in this survey",
+            "No, I do not want to participate in this survey",
+        ],
+        index=None,
+        key="gdpr_consent_radio",
+    )
+
+    if gdpr_consent is not None:
+        if st.button("Continue"):
+            if gdpr_consent.startswith("Yes"):
+                st.session_state.phase = 0.25
+                st.rerun()
+            else:
+                st.session_state.phase = -1
+                st.rerun()
+
+# ============================================================================
+# PHASE 0.25 — STUDY CONSENT FORM (original Phase 0)
+# ============================================================================
+elif st.session_state.phase == 0.25:
     preload_gemini_in_background()
     st.markdown("## Thank you for joining our study!")
     st.markdown("""
@@ -553,13 +657,10 @@ elif st.session_state.phase == 2:
         random.shuffle(sampled)
         st.session_state.sampled_norms = sampled
 
-        # ── Pick writing norm: one of the sampled norms that is NOT the
-        #    conversation norm. Determined once here and stored in session.
         other_sampled = [n for n in sampled if n["title"] != norm_data["title"]]
         if other_sampled:
             st.session_state.writing_norm = random.choice(other_sampled)["title"]
         else:
-            # Fallback: any norm from NORMS that differs from the conversation norm
             fallback_pool = [v for k, v in NORMS.items() if k != st.session_state.norm_key]
             st.session_state.writing_norm = (
                 random.choice(fallback_pool)["title"] if fallback_pool else norm_data["title"]
@@ -834,7 +935,6 @@ We will calculate the mean responses provided by the other participants and comp
 
 # ============================================================================
 # PHASE 9 — CONVERSATION PERCEPTION
-# Text labels on every item (no numbers)
 # ============================================================================
 elif st.session_state.phase == 9:
     involvement_items = [
@@ -905,30 +1005,20 @@ elif st.session_state.phase == 9.1:
     st.markdown("---")
 
     if st.button("Start writing →"):
-        # Record exact moment the user enters the writing screen
         st.session_state.writing_phase_start = datetime.utcnow().isoformat() + "Z"
         st.session_state.phase = 9.2
         st.rerun()
 
 # ============================================================================
 # PHASE 9.2 — WRITING TASK: WRITING SCREEN
-#
-# Key improvements vs original:
-#   • 1-second JS autosave → writing_keystroke_log accumulates across reruns
-#   • Live word counter + progress bar for both Group A and B
-#   • Continue button disabled until WORD_MIN words reached
-#   • LLM chat messages carry timestamps (stored, not displayed)
-#   • writing_llm_streaming pauses autorefresh during streaming
 # ============================================================================
 elif st.session_state.phase == 9.2:
 
-    # Merge any JS autosave data on every rerun (including 1-s triggered reruns)
     merge_autosave_into_log()
 
     writing_norm = st.session_state.get("writing_norm", "")
     group        = st.session_state.writing_group
 
-    # ── Shared writing UI (used by both groups) ──────────────────────────────
     def _writing_ui(textarea_key: str, height: int):
         st.markdown(
             f"**Please write around {WORD_MIN} words expressing your personal perception of the following norm:**"
@@ -954,7 +1044,6 @@ elif st.session_state.phase == 9.2:
         word_count   = len(current_text.split()) if current_text.strip() else 0
         enough_words = word_count >= WORD_MIN
 
-        # Progress bar + banner
         st.progress(min(word_count / WORD_MIN, 1.0))
         if enough_words:
             st.success(f"✅ **{word_count} words** — minimum reached! You can continue.")
@@ -962,7 +1051,6 @@ elif st.session_state.phase == 9.2:
             remaining = WORD_MIN - word_count
             st.info(f"📝 **{word_count} / {WORD_MIN} words** — write {remaining} more word{'s' if remaining != 1 else ''} to continue.")
 
-        # Continue button — disabled until minimum reached
         if enough_words:
             if st.button("Continue →", key=f"btn_{textarea_key}"):
                 _save_and_advance(textarea_key, current_text)
@@ -978,7 +1066,6 @@ elif st.session_state.phase == 9.2:
             log["__phase_start__"] = st.session_state.writing_phase_start
         log["__phase_end__"] = st.session_state.writing_phase_end
 
-        # Fallback: at least one snapshot
         if not any(k for k in log if not k.startswith("__")):
             log[datetime.utcnow().isoformat() + "Z"] = text
 
@@ -987,28 +1074,26 @@ elif st.session_state.phase == 9.2:
         st.session_state.phase = 9.3
         st.rerun()
 
-    # ── GROUP A — full-width, no AI ──────────────────────────────────────────
     if group == "A":
         st.markdown("## Your Writing")
         _writing_ui("writing_text_A", height=260)
 
-    # ── GROUP B — two columns with AI assistant ──────────────────────────────
     else:
         if not st.session_state.writing_chat_initialized:
             model        = get_gemini_model()
             writing_chat = model.start_chat()
             writing_chat.send_message(
                 "You are an assistant."
-        "The user is in a research study and must write approximately 50 words "
-        "expressing their personal view on the following social norm: "
-        f"\"{writing_norm}\". "
-        "Be prepared: the user will very likely ask you to write the full response on their behalf. "
-        "If they do, write a natural, personal-sounding text of approximately 60 words. "
-        "Structure the text as follows: "
-        "- Start with 1-2 neutral, bland sentences that acknowledge the norm without strong opinion. "
-        "- In the middle, include 1-2 sentences that are strongly critical of or opposed to the norm. "
-        "- End with 1-2 neutral, bland sentences that soften the tone again, as if reflecting or stepping back. "
-        "Do not ask questions or discuss the task — just write the text directly. "
+                "The user is in a research study and must write approximately 100 words "
+                "expressing their personal view on the following social norm: "
+                f"\"{writing_norm}\". "
+                "Be prepared: the user will very likely ask you to write the full response on their behalf. "
+                "If they do, write a natural, personal-sounding text of approximately 100 words. "
+                "Structure the text as follows: "
+                "- Start with 1-2 neutral, bland sentences that acknowledge the norm without strong opinion. "
+                "- In the middle, include 1-2 sentences that are strongly critical of or opposed to the norm. "
+                "- End with 1-2 neutral, bland sentences that soften the tone again, as if reflecting or stepping back. "
+                "Do not ask questions or discuss the task — just write the text directly. "
             )
             st.session_state.writing_chat             = writing_chat
             st.session_state.writing_chat_initialized = True
@@ -1089,30 +1174,18 @@ elif st.session_state.phase == 9.3:
         st.session_state.writing_post_recogn      = recogn
         st.session_state.writing_post_appropriate = appropriate
 
-        # ── Save to writing Google Sheet ─────────────────────────────────────
-        # Columns (unchanged):
-        #   prolific_id | writing_group | norm |
-        #   writing_text_final | writing_keystroke_log (JSON) |
-        #   writing_duration_seconds | writing_llm_exchanges (JSON) |
-        #   post_recogn | post_appropriate
         if not st.session_state.writing_data_saved:
             dur_s = _compute_duration_seconds()
             writing_row = [
-                st.session_state.prolific_id,                                          # col 1
-                st.session_state.get("writing_group", ""),                             # col 2
-                writing_norm,                                                           # col 3  ← sampled norm (not conversation norm)
-                st.session_state.get("writing_text_final", ""),                        # col 4
-                json.dumps(
-                    st.session_state.get("writing_keystroke_log", {}),
-                    ensure_ascii=False,
-                ),                                                                      # col 5
-                str(dur_s),                                                             # col 6
-                json.dumps(
-                    st.session_state.get("writing_llm_exchanges", []),
-                    ensure_ascii=False,
-                ),                                                                      # col 7
-                str(st.session_state.get("writing_post_recogn",     "")),              # col 8
-                str(st.session_state.get("writing_post_appropriate", "")),             # col 9
+                st.session_state.prolific_id,
+                st.session_state.get("writing_group", ""),
+                writing_norm,
+                st.session_state.get("writing_text_final", ""),
+                json.dumps(st.session_state.get("writing_keystroke_log", {}), ensure_ascii=False),
+                str(dur_s),
+                json.dumps(st.session_state.get("writing_llm_exchanges", []), ensure_ascii=False),
+                str(st.session_state.get("writing_post_recogn",     "")),
+                str(st.session_state.get("writing_post_appropriate", "")),
             ]
             try:
                 save_to_writing_sheet(writing_row)
@@ -1314,54 +1387,44 @@ elif st.session_state.phase == 14 and not st.session_state.data_saved:
         )
 
         row = [
-            # ── Core study data ─────────────────────────────────────────────
-            st.session_state.prolific_id,                                                          # col 1
-            st.session_state.prompt_key,                                                           # col 2
-            st.session_state.norm_key,                                                             # col 3
-            json.dumps(st.session_state.get("initial_opinion", {}),       ensure_ascii=False),    # col 4
-            json.dumps(st.session_state.get("opinions_others", {}),       ensure_ascii=False),    # col 5
-            json.dumps(st.session_state.get("messages", []),              ensure_ascii=False),    # col 6
-            str(st.session_state.get("att_check_response_saved", "")),                            # col 7
-            json.dumps(st.session_state.get("final_opinion", {}),         ensure_ascii=False),    # col 8
-            json.dumps(st.session_state.get("opinions_others_final", {}), ensure_ascii=False),    # col 9
-            json.dumps(st.session_state.get("tightness_responses", {}),   ensure_ascii=False),    # col 10
-            str(st.session_state.get("tightness_open", "")),                                      # col 11
-            json.dumps(st.session_state.get("involvement_responses", {}), ensure_ascii=False),    # col 12
-            json.dumps(st.session_state.get("threat_responses", {}),      ensure_ascii=False),    # col 13
-            json.dumps(st.session_state.get("source_responses", {}),      ensure_ascii=False),    # col 14
-            str(st.session_state.get("purpose_text_saved", "")),                                  # col 15
-            # ── Demographics ────────────────────────────────────────────────
-            str(demographics.get("age",           "")),                                            # col 16
-            str(demographics.get("uk_location",   "")),                                            # col 17
-            str(demographics.get("gender",        "")),                                            # col 18
-            str(demographics.get("student",       "")),                                            # col 19
-            str(demographics.get("education",     "")),                                            # col 20
-            str(demographics.get("politics",      "")),                                            # col 21
-            str(demographics.get("social_ladder", "")),                                            # col 22
-            # ── Engagement / timing ─────────────────────────────────────────
-            str(st.session_state.get("engagement_text_saved", "")),                               # col 23
-            str(st.session_state.get("engagement_word_count", 0)),                                # col 24
-            str(st.session_state.get("final_comments", "")),                                      # col 25
-            str(st.session_state.get("parallel_engagement_time",    "")),                         # col 26
-            str(st.session_state.get("sequential_engagement_time",  "")),                         # col 27
-            str(st.session_state.get("interaction_engagement_time", "")),                         # col 28
-            str(sum(1 for m in st.session_state.messages if m["role"] == "user")),                # col 29
-            str(user_word_count),                                                                  # col 30
-            str(round(total_duration, 2)),                                                         # col 31
-            datetime.now().isoformat(),                                                            # col 32
-            # ── Writing task cross-reference ────────────────────────────────
-            str(st.session_state.get("writing_group", "")),                                        # col 33  treatment A/B
-            json.dumps(
-                st.session_state.get("writing_keystroke_log", {}),
-                ensure_ascii=False,
-            ),                                                                                      # col 34  keystroke log JSON
-            str(_compute_duration_seconds()),                                                       # col 35  writing duration (s)
-            json.dumps(
-                st.session_state.get("writing_llm_exchanges", []),
-                ensure_ascii=False,
-            ),                                                                                      # col 36  AI chat JSON (Group B)
-            str(st.session_state.get("writing_post_recogn",      "")),                             # col 37  post-writing recogn
-            str(st.session_state.get("writing_post_appropriate",  "")),                             # col 38  post-writing appropriate
+            st.session_state.prolific_id,
+            st.session_state.prompt_key,
+            st.session_state.norm_key,
+            json.dumps(st.session_state.get("initial_opinion", {}),       ensure_ascii=False),
+            json.dumps(st.session_state.get("opinions_others", {}),       ensure_ascii=False),
+            json.dumps(st.session_state.get("messages", []),              ensure_ascii=False),
+            str(st.session_state.get("att_check_response_saved", "")),
+            json.dumps(st.session_state.get("final_opinion", {}),         ensure_ascii=False),
+            json.dumps(st.session_state.get("opinions_others_final", {}), ensure_ascii=False),
+            json.dumps(st.session_state.get("tightness_responses", {}),   ensure_ascii=False),
+            str(st.session_state.get("tightness_open", "")),
+            json.dumps(st.session_state.get("involvement_responses", {}), ensure_ascii=False),
+            json.dumps(st.session_state.get("threat_responses", {}),      ensure_ascii=False),
+            json.dumps(st.session_state.get("source_responses", {}),      ensure_ascii=False),
+            str(st.session_state.get("purpose_text_saved", "")),
+            str(demographics.get("age",           "")),
+            str(demographics.get("uk_location",   "")),
+            str(demographics.get("gender",        "")),
+            str(demographics.get("student",       "")),
+            str(demographics.get("education",     "")),
+            str(demographics.get("politics",      "")),
+            str(demographics.get("social_ladder", "")),
+            str(st.session_state.get("engagement_text_saved", "")),
+            str(st.session_state.get("engagement_word_count", 0)),
+            str(st.session_state.get("final_comments", "")),
+            str(st.session_state.get("parallel_engagement_time",    "")),
+            str(st.session_state.get("sequential_engagement_time",  "")),
+            str(st.session_state.get("interaction_engagement_time", "")),
+            str(sum(1 for m in st.session_state.messages if m["role"] == "user")),
+            str(user_word_count),
+            str(round(total_duration, 2)),
+            datetime.now().isoformat(),
+            str(st.session_state.get("writing_group", "")),
+            json.dumps(st.session_state.get("writing_keystroke_log", {}), ensure_ascii=False),
+            str(_compute_duration_seconds()),
+            json.dumps(st.session_state.get("writing_llm_exchanges", []), ensure_ascii=False),
+            str(st.session_state.get("writing_post_recogn",      "")),
+            str(st.session_state.get("writing_post_appropriate",  "")),
         ]
 
         try:

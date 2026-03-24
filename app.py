@@ -525,33 +525,32 @@ elif st.session_state.phase == 0:
                 st.rerun()
 
 # ============================================================================
-# PHASE 0.25 — STUDY CONSENT FORM (original Phase 0)
+# PHASE 0.25 — STUDY CONSENT FORM (simplified, no redundancy)
 # ============================================================================
 elif st.session_state.phase == 0.25:
     preload_gemini_in_background()
     st.markdown("## Thank you for joining our study!")
+
     st.markdown("""
-**Before proceeding, please read carefully the information reported below.**
+**Before proceeding, please read the information below.**
 
 **Aim of the Study**  
-You are being invited to participate in a study of social norms. The purpose of this study is to analyze everyday norms – i.e., norms about behavior that many people perform regularly, and most people could perform if they wanted to – and to understand how people engage in conversations about these topics with an advanced AI.
+You are invited to participate in a study on social norms. The goal is to understand how people evaluate everyday behaviors and how they discuss these topics with an advanced AI.
 
 **What will I be asked to do?**  
-If you agree to take part, you will be asked to answer a set of survey questions related to social norms. These include questions about how appropriate you and other people think behaviors are in different settings. Concerning questions about how other people perceive behaviors, you will receive a bonus payment if you make a correct guess. Next, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The study should take approximately 12 minutes to complete.
+You will complete a short survey about social norms and then engage in a brief conversation with an AI based on your responses.  
+The study takes approximately 12 minutes. Some questions include bonus payments (£0.50 each, up to £1 total).
 
-**Can I change my mind?**  
-Participation is voluntary and you can decline to participate in the research or any aspects of the research at any time without penalty. You may withdraw by simply closing the browser on the computer. It will not be possible for you to withdraw after the completion of the survey because your responses are anonymous.
+**Voluntary participation**  
+Your participation is voluntary. You may stop at any time by closing the browser. After completing the study, withdrawal will no longer be possible due to data anonymization.
 
 **Risks and benefits**  
-There are no direct risk to you as a participant. Study results will help inform the scholarly understanding of AI conversations about everyday norms work. There is a risk that some of the questions may be sensitive and/or could cause you psychological distress. You don't have to answer any questions you don't want to. There are questions where you will receive a bonus payment of £0.50 if you answer correctly (two questions, for a maximum of £1).
+There are no direct risks. Some questions may feel sensitive; you may skip any question you prefer not to answer.
 
-**Privacy and data**  
-The data that you provide will be anonymous so your responses cannot be linked back to you. The study data will be stored on an encrypted server at *(TBD)*. The anonymous dataset will be stored indefinitely and shared with other researchers for research and teaching purposes. We plan to publish the results of this study in academic journals and present them at conferences.
+**Contact**  
+For any questions about the study, please contact: **contacttheresearchers@gmail.com**
 
-**Any questions?**  
-If you have any questions about the research, please contact jacopo.nudo@uniroma1.it .
-
-By clicking "I agree" below you are indicating that you have read this information and agree to participate in this research study.
+By clicking "I agree", you confirm that you have read and understood this information and agree to participate.
 """)
 
     consent = st.radio(
@@ -572,11 +571,11 @@ By clicking "I agree" below you are indicating that you have read this informati
                 st.stop()
             st.session_state.phase = 0.5
             st.rerun()
+
     elif consent == "I do not agree":
         if st.button("Continue"):
             st.session_state.phase = -1
             st.rerun()
-
 # ============================================================================
 # PHASE 0.5 — DATA QUALITY CHECK
 # ============================================================================

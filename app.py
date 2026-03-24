@@ -460,7 +460,7 @@ elif st.session_state.phase == 0:
         "- **Purpose** (Art. 13, par. 1, letter c): Data collected will be used exclusively for the "
         "research purposes described above.\n"
         "- **Recipients** (Art. 13, par. 1, letter e): Access is reserved exclusively for researchers "
-        "authorised by the Director of ISTC-CNR. The list is available at contacttheresearchers@gmail.com.\n"
+        "authorised by the Director of ISTC-CNR. The list is available at jacopo.nudo@uniroma1.it .\n"
         "- **Data transfer to third countries** (Art. 13, par. 1, letter f): Data will **not** be "
         "transferred to third countries.\n"
         "- **Data retention** (Art. 13, par. 2, letter a): Data will be kept on a secure server at Google. "
@@ -480,7 +480,7 @@ elif st.session_state.phase == 0:
         "you may lodge a complaint with the Data Protection Authority.\n"
         "- **Providing personal data** (Art. 13, par. 2, letter e): By participating you accept all the "
         "purposes described above and provide the Data Controller with your personal data.\n\n"
-        "To exercise your rights, write to **contacttheresearchers@gmail.com** including your Prolific ID."
+        "To exercise your rights, write to **jacopo.nudo@uniroma1.it** including your Prolific ID."
     )
 
     st.markdown("### Legal Basis")
@@ -517,7 +517,7 @@ elif st.session_state.phase == 0:
 
     if gdpr_consent is not None:
         if st.button("Continue"):
-            if gdpr_consent.startswith("Yes"):
+            if gdpr_consent.startswith("Yes"):f
                 st.session_state.phase = 0.25
                 st.rerun()
             else:
@@ -548,7 +548,7 @@ Your participation is voluntary. You may stop at any time by closing the browser
 There are no direct risks. Some questions may feel sensitive; you may skip any question you prefer not to answer.
 
 **Contact**  
-For any questions about the study, please contact: **contacttheresearchers@gmail.com**
+For any questions about the study, please contact: **jacopo.nudo@uniroma1.it**
 
 By clicking "I agree", you confirm that you have read and understood this information and agree to participate.
 """)

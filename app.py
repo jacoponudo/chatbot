@@ -922,7 +922,6 @@ elif st.session_state.phase == 5:
 
     st.markdown("---")
     if enough_messages:
-        st.success(f"✅ **{user_msg_count} message{'s' if user_msg_count != 1 else ''} sent** — you can end the discussion whenever you're ready.")
         if st.button("End Discussion & Continue"):
             st.session_state.phase = 6
             st.rerun()

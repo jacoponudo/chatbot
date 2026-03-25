@@ -113,6 +113,56 @@ def save_to_google_sheets(row):
     get_sheet().append_row(row, value_input_option="RAW")
 
 # ============================================================================
+# SAVE EXCLUDED PARTICIPANTS
+# ============================================================================
+def save_excluded_participant(reason: str):
+    """Save a partial row for participants excluded mid-study."""
+    if st.session_state.get("excluded_data_saved"):
+        return
+    try:
+        row = [
+            st.session_state.get("prolific_id", ""),
+            st.session_state.get("prompt_key", ""),
+            st.session_state.get("norm_key", ""),
+            json.dumps(st.session_state.get("initial_opinion", {}),  ensure_ascii=False),
+            json.dumps(st.session_state.get("opinions_others", {}),  ensure_ascii=False),
+            json.dumps(st.session_state.get("messages", []),         ensure_ascii=False),
+            str(st.session_state.get("att_check_response_saved", "")),
+            str(st.session_state.get("att_check_passed", "")),
+            "",  # final_opinion — not reached
+            "",  # opinions_others_final — not reached
+            "",  # tightness_responses — not reached
+            "",  # tightness_open
+            "",  # involvement_responses
+            "",  # threat_responses
+            "",  # source_responses
+            "",  # purpose_text
+            "",  # age
+            "",  # uk_location
+            "",  # gender
+            "",  # student
+            "",  # education
+            "",  # politics
+            "",  # social_ladder
+            str(st.session_state.get("engagement_text_saved", "")),
+            str(st.session_state.get("engagement_word_count", 0)),
+            "",  # final_comments
+            str(st.session_state.get("parallel_engagement_time",    "")),
+            str(st.session_state.get("sequential_engagement_time",  "")),
+            str(st.session_state.get("interaction_engagement_time", "")),
+            str(sum(1 for m in st.session_state.get("messages", []) if m["role"] == "user")),
+            "",  # user_word_count
+            "",  # total_duration
+            datetime.now().isoformat(),
+            f"EXCLUDED: {reason}",  # writing_group field repurposed as exclusion tag
+            "", "", "", "", "", "",
+        ]
+        save_to_google_sheets(row)
+        st.session_state.excluded_data_saved = True
+    except Exception:
+        pass  # silent — don't block the termination screen
+
+# ============================================================================
 # VERTEX AI / GEMINI CLIENT — lazy
 # ============================================================================
 def get_gemini_model() -> GenerativeModel:
@@ -207,6 +257,28 @@ def scroll_to_top_on_phase_entry():
     if st.session_state.get("last_scrolled_phase") != current_phase:
         scroll_to_top()
         st.session_state.last_scrolled_phase = current_phase
+
+# ============================================================================
+# LEAVE WARNING (refresh / back button)
+# ============================================================================
+def inject_leave_warning():
+    """Show a browser confirmation dialog if the user tries to leave/refresh."""
+    st.components.v1.html(
+        """
+        <script>
+        (function() {
+            if (window.parent._leaveWarningAttached) return;
+            window.parent._leaveWarningAttached = true;
+            window.parent.addEventListener('beforeunload', function(e) {
+                e.preventDefault();
+                e.returnValue = '';   // Required for Chrome/Edge
+                return '';
+            });
+        })();
+        </script>
+        """,
+        height=0,
+    )
 
 # ============================================================================
 # LIKERT-7 HELPERS
@@ -416,6 +488,8 @@ if "session_initialized" not in st.session_state:
         "system_prompt_cache":          None,
         "last_scrolled_phase":          None,
         "captcha_passed":               False,
+        "excluded_reason":              None,
+        "excluded_data_saved":          False,
         # Writing task
         "writing_word_min":             random.choice([50, 100]),
         "writing_group_raw":            random.choices(["A", "B"]),
@@ -452,9 +526,39 @@ WORD_MIN = st.session_state.writing_word_min
 scroll_to_top_on_phase_entry()
 
 # ============================================================================
+# LEAVE WARNING — active for all phases between 1 and 13 inclusive
+# (not on consent/intro screens, not on termination, not after submission)
+# ============================================================================
+_active_phases = {1, 2, 3, 4, 5, 6, 7, 8, 9, 9.1, 9.2, 9.3, 10, 11, 12, 13}
+if st.session_state.phase in _active_phases:
+    inject_leave_warning()
+
+# ============================================================================
 # PHASE -1 — EARLY TERMINATION
 # ============================================================================
 if st.session_state.phase == -1:
+
+    # Determine exclusion reason (set once)
+    if not st.session_state.get("excluded_reason"):
+        gdpr_val    = st.session_state.get("gdpr_consent_radio", "")
+        consent_val = st.session_state.get("consent_radio", "")
+        quality_val = st.session_state.get("quality_radio", "")
+
+        if gdpr_val and not gdpr_val.startswith("Yes"):
+            reason = "refused_gdpr_consent"
+        elif consent_val == "I do not agree":
+            reason = "refused_study_consent"
+        elif quality_val in ("I will not provide my best answers", "I can't promise either way"):
+            reason = "failed_quality_check"
+        elif st.session_state.get("att_check_passed") is False:
+            reason = "failed_attention_check"
+        else:
+            reason = "unknown"
+        st.session_state.excluded_reason = reason
+
+    # Save once, silently
+    save_excluded_participant(st.session_state.excluded_reason)
+
     st.markdown("## Thank you for your time.")
     st.markdown(
         "Unfortunately, your answer makes it impossible for us to include you in this study. "

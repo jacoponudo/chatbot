@@ -416,22 +416,42 @@ def _compute_duration_seconds() -> int:
 # ============================================================================
 # CAPTCHA HELPER
 # ============================================================================
-CAPTCHA_LENGTH = 4
-CAPTCHA_WIDTH  = 200
-CAPTCHA_HEIGHT = 150
+CAPTCHA_LENGTH  = 4
+CAPTCHA_WIDTH   = 200
+CAPTCHA_HEIGHT  = 150
+CAPTCHA_MAX_ATTEMPTS = 3
 
 def render_captcha_phase():
     """
     Renders the CAPTCHA screen. Returns True if the user has already passed,
-    False if they are still on this screen (caller should st.stop()).
+    False if they are still on this screen.
+    After CAPTCHA_MAX_ATTEMPTS failures the participant is sent to phase -1.
     """
     if st.session_state.get("captcha_passed"):
         return True
 
+    # Initialise attempt counter
+    if "captcha_attempts" not in st.session_state:
+        st.session_state.captcha_attempts = 0
+
+    # Already exceeded max attempts → redirect to exclusion
+    if st.session_state.captcha_attempts >= CAPTCHA_MAX_ATTEMPTS:
+        st.session_state.excluded_reason = "failed_captcha"
+        st.session_state.phase = -1
+        st.rerun()
+
+    remaining_attempts = CAPTCHA_MAX_ATTEMPTS - st.session_state.captcha_attempts
+
     st.markdown("## Human Verification")
     st.markdown("Please complete the verification below to continue.")
 
-    # Generate a captcha string once and store it
+    if remaining_attempts < CAPTCHA_MAX_ATTEMPTS:
+        st.warning(
+            f"Incorrect code. Please try again. "
+            f"You have **{remaining_attempts}** attempt{'s' if remaining_attempts != 1 else ''} remaining."
+        )
+
+    # Generate a captcha string once per attempt
     if "captcha_text" not in st.session_state:
         st.session_state.captcha_text = "".join(
             random.choices(string.ascii_uppercase + string.digits, k=CAPTCHA_LENGTH)
@@ -444,20 +464,28 @@ def render_captcha_phase():
     with col1:
         st.image(data)
     with col2:
-        user_input = st.text_input("Enter the characters shown in the image:", key="captcha_input")
+        user_input = st.text_input(
+            "Enter the characters shown in the image:",
+            key=f"captcha_input_{st.session_state.captcha_attempts}"
+        )
 
     if st.button("Verify"):
-        entered = st.session_state.get("captcha_input", "").replace(" ", "").strip().upper()
+        entered = (
+            st.session_state.get(f"captcha_input_{st.session_state.captcha_attempts}", "")
+            .replace(" ", "").strip().upper()
+        )
         if entered == st.session_state.captcha_text.upper():
             st.session_state.captcha_passed = True
-            # Clean up so a fresh captcha is shown if ever needed again
             del st.session_state["captcha_text"]
             st.rerun()
         else:
-            st.error("Incorrect code. Please try again.")
-            # Regenerate captcha
+            st.session_state.captcha_attempts += 1
             if "captcha_text" in st.session_state:
                 del st.session_state["captcha_text"]
+            # Check immediately if now over the limit
+            if st.session_state.captcha_attempts >= CAPTCHA_MAX_ATTEMPTS:
+                st.session_state.excluded_reason = "failed_captcha"
+                st.session_state.phase = -1
             st.rerun()
 
     return False
@@ -529,10 +557,9 @@ scroll_to_top_on_phase_entry()
 # LEAVE WARNING — active for all phases between 1 and 13 inclusive
 # (not on consent/intro screens, not on termination, not after submission)
 # ============================================================================
-_active_phases = {1, 2, 3, 4, 5, 6, 7, 8, 9, 9.1, 9.2, 9.3, 10, 11, 12, 13}
+_active_phases = {0.25, 0.5, 0.75, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9.1, 9.2, 9.3, 10, 11, 12, 13, 14}
 if st.session_state.phase in _active_phases:
     inject_leave_warning()
-
 # ============================================================================
 # PHASE -1 — EARLY TERMINATION
 # ============================================================================
@@ -552,6 +579,8 @@ if st.session_state.phase == -1:
             reason = "failed_quality_check"
         elif st.session_state.get("att_check_passed") is False:
             reason = "failed_attention_check"
+        elif st.session_state.get("excluded_reason") == "failed_captcha":
+            reason = "failed_captcha"
         else:
             reason = "unknown"
         st.session_state.excluded_reason = reason

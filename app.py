@@ -267,13 +267,19 @@ def inject_leave_warning():
         """
         <script>
         (function() {
-            if (window.parent._leaveWarningAttached) return;
-            window.parent._leaveWarningAttached = true;
-            window.parent.addEventListener('beforeunload', function(e) {
-                e.preventDefault();
-                e.returnValue = '';   // Required for Chrome/Edge
-                return '';
-            });
+            function attachWarning(win) {
+                if (!win) return;
+                if (win._leaveWarningAttached) return;
+                win._leaveWarningAttached = true;
+                win.addEventListener('beforeunload', function(e) {
+                    e.preventDefault();
+                    e.returnValue = 'If you leave or refresh this page, all your progress will be lost and you will have to start over.';
+                    return 'If you leave or refresh this page, all your progress will be lost and you will have to start over.';
+                });
+            }
+            attachWarning(window);
+            try { attachWarning(window.parent); } catch(e) {}
+            try { attachWarning(window.top); }    catch(e) {}
         })();
         </script>
         """,

@@ -928,7 +928,6 @@ elif st.session_state.phase == 5:
             st.rerun()
     else:
         remaining = 2 - user_msg_count
-        st.info(f"💬 **{user_msg_count} / 2 messages sent** — send {remaining} more message{'s' if remaining != 1 else ''} to continue.")
         st.button("End Discussion & Continue", disabled=True)
 
 # ============================================================================

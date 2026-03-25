@@ -422,7 +422,7 @@ def _compute_duration_seconds() -> int:
 # ============================================================================
 # CAPTCHA HELPER
 # ============================================================================
-CAPTCHA_LENGTH  = 4
+CAPTCHA_LENGTH  = 5
 CAPTCHA_WIDTH   = 200
 CAPTCHA_HEIGHT  = 150
 CAPTCHA_MAX_ATTEMPTS = 3
@@ -525,7 +525,7 @@ if "session_initialized" not in st.session_state:
         "excluded_reason":              None,
         "excluded_data_saved":          False,
         # Writing task
-        "writing_word_min":             random.choice([50, 100]),
+        "writing_word_min":             random.choice([50, 75]),
         "writing_group_raw":            random.choices(["A", "B"]),
         "writing_group":                None,
         "writing_norm":                 None,

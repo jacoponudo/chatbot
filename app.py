@@ -6,6 +6,7 @@ import json
 import os
 import time
 import random
+import string
 from collections import defaultdict
 
 import vertexai
@@ -13,6 +14,7 @@ from vertexai.generative_models import GenerativeModel, ChatSession
 import threading
 
 from streamlit_autorefresh import st_autorefresh
+from captcha.image import ImageCaptcha
 
 # ============================================================================
 # PAGE CONFIG
@@ -340,6 +342,55 @@ def _compute_duration_seconds() -> int:
         return -1
 
 # ============================================================================
+# CAPTCHA HELPER
+# ============================================================================
+CAPTCHA_LENGTH = 4
+CAPTCHA_WIDTH  = 200
+CAPTCHA_HEIGHT = 150
+
+def render_captcha_phase():
+    """
+    Renders the CAPTCHA screen. Returns True if the user has already passed,
+    False if they are still on this screen (caller should st.stop()).
+    """
+    if st.session_state.get("captcha_passed"):
+        return True
+
+    st.markdown("## Human Verification")
+    st.markdown("Please complete the verification below to continue.")
+
+    # Generate a captcha string once and store it
+    if "captcha_text" not in st.session_state:
+        st.session_state.captcha_text = "".join(
+            random.choices(string.ascii_uppercase + string.digits, k=CAPTCHA_LENGTH)
+        )
+
+    image = ImageCaptcha(width=CAPTCHA_WIDTH, height=CAPTCHA_HEIGHT)
+    data  = image.generate(st.session_state.captcha_text)
+
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.image(data)
+    with col2:
+        user_input = st.text_input("Enter the characters shown in the image:", key="captcha_input")
+
+    if st.button("Verify"):
+        entered = st.session_state.get("captcha_input", "").replace(" ", "").strip().upper()
+        if entered == st.session_state.captcha_text.upper():
+            st.session_state.captcha_passed = True
+            # Clean up so a fresh captcha is shown if ever needed again
+            del st.session_state["captcha_text"]
+            st.rerun()
+        else:
+            st.error("Incorrect code. Please try again.")
+            # Regenerate captcha
+            if "captcha_text" in st.session_state:
+                del st.session_state["captcha_text"]
+            st.rerun()
+
+    return False
+
+# ============================================================================
 # PROLIFIC ID
 # ============================================================================
 prolific_id = st.query_params.get("PROLIFIC_PID", "")
@@ -354,7 +405,7 @@ if "session_initialized" not in st.session_state:
     st.session_state.update({
         "session_initialized":          True,
         "prolific_id":                  prolific_id,
-        "phase":                        0,          # Phase 0 = GDPR informed consent (NEW)
+        "phase":                        0,
         "messages":                     [],
         "greeting_sent":                False,
         "data_saved":                   False,
@@ -364,6 +415,7 @@ if "session_initialized" not in st.session_state:
         "gemini_chat":                  None,
         "system_prompt_cache":          None,
         "last_scrolled_phase":          None,
+        "captcha_passed":               False,
         # Writing task
         "writing_word_min":             random.choice([50, 100]),
         "writing_group_raw":            random.choices(["A", "B"]),
@@ -411,7 +463,7 @@ if st.session_state.phase == -1:
     st.stop()
 
 # ============================================================================
-# PHASE 0 — GDPR INFORMED CONSENT (NEW — first screen shown to participants)
+# PHASE 0 — GDPR INFORMED CONSENT
 # ============================================================================
 elif st.session_state.phase == 0:
     st.markdown("## Informed Consent — Data Protection Information")
@@ -525,7 +577,7 @@ elif st.session_state.phase == 0:
                 st.rerun()
 
 # ============================================================================
-# PHASE 0.25 — STUDY CONSENT FORM (simplified, no redundancy)
+# PHASE 0.25 — STUDY CONSENT FORM
 # ============================================================================
 elif st.session_state.phase == 0.25:
     preload_gemini_in_background()
@@ -576,11 +628,18 @@ By clicking "I agree", you confirm that you have read and understood this inform
         if st.button("Continue"):
             st.session_state.phase = -1
             st.rerun()
+
 # ============================================================================
 # PHASE 0.5 — DATA QUALITY CHECK
 # ============================================================================
 elif st.session_state.phase == 0.5:
     st.markdown("We care about the quality of our survey data. For us to fully understand your opinions, it is important that you provide careful answers to each question in this survey.")
+    st.markdown(
+        "Please note that this survey contains **attention check questions**. "
+        "These are simple questions designed to verify that participants are reading carefully. "
+        "**If you do not answer them correctly, you will be excluded from the study, "
+        "the survey will end immediately, and you will not receive any payment.**"
+    )
     st.markdown("**Do you commit to thoughtfully provide your best answers to the questions in this survey?**")
 
     quality = st.radio(
@@ -596,12 +655,22 @@ elif st.session_state.phase == 0.5:
 
     if quality == "I will try to provide my best answers":
         if st.button("Continue"):
-            st.session_state.phase = 1
+            st.session_state.phase = 0.75   # → CAPTCHA next
             st.rerun()
     elif quality in ("I will not provide my best answers", "I can't promise either way"):
         if st.button("Continue"):
             st.session_state.phase = -1
             st.rerun()
+
+# ============================================================================
+# PHASE 0.75 — CAPTCHA VERIFICATION
+# ============================================================================
+elif st.session_state.phase == 0.75:
+    passed = render_captcha_phase()
+    if passed:
+        st.session_state.phase = 1
+        st.rerun()
+    # render_captcha_phase handles st.stop() implicitly by not advancing
 
 # ============================================================================
 # PHASE 1 — BACKGROUND QUESTION
@@ -847,25 +916,45 @@ elif st.session_state.phase == 5:
             })
         st.rerun()
 
+    # ── End Discussion button — mirrors Phase 9.2 word-count gate ──────────
     user_msg_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
-    if st.button("End Discussion & Continue"):
-        if user_msg_count >= 2:
+    enough_messages = user_msg_count >= 2
+
+    st.markdown("---")
+    if enough_messages:
+        st.success(f"✅ **{user_msg_count} message{'s' if user_msg_count != 1 else ''} sent** — you can end the discussion whenever you're ready.")
+        if st.button("End Discussion & Continue"):
             st.session_state.phase = 6
             st.rerun()
+    else:
+        remaining = 2 - user_msg_count
+        st.info(f"💬 **{user_msg_count} / 2 messages sent** — send {remaining} more message{'s' if remaining != 1 else ''} to continue.")
+        st.button("End Discussion & Continue", disabled=True)
 
 # ============================================================================
-# PHASE 6 — ATTENTION CHECK
+# PHASE 6 — ATTENTION CHECK  ← exclusion added here
 # ============================================================================
 elif st.session_state.phase == 6:
     st.markdown("**Which of the following best describes the main topic discussed with the AI?**")
     options = [n["title"] for n in st.session_state.sampled_norms] + ["None of the above / I don't remember"]
     st.radio("Select one:", options, index=None, key="att_check_response", label_visibility="collapsed")
+
     if st.button("Continue"):
         if not st.session_state.get("att_check_response"):
             st.warning("Please select an answer before continuing.")
             st.stop()
-        st.session_state.att_check_response_saved = st.session_state.att_check_response
-        st.session_state.phase = 7
+
+        chosen        = st.session_state.att_check_response
+        correct_title = NORMS[st.session_state.norm_key]["title"]
+
+        st.session_state.att_check_response_saved = chosen
+        st.session_state.att_check_passed         = (chosen == correct_title)
+
+        if not st.session_state.att_check_passed:
+            # Participant failed the attention check → exclude
+            st.session_state.phase = -1
+        else:
+            st.session_state.phase = 7
         st.rerun()
 
 # ============================================================================
@@ -964,9 +1053,9 @@ elif st.session_state.phase == 9:
 
     st.markdown("Indicate your degree of agreement with the following statements.")
     st.markdown("*Scale: Totally disagree → Totally agree*")
-    _render_group(involvement_items, "Involvement — The messages I read during the conversation with the AI:")
-    _render_group(threat_items,      "Perceived Threat — The messages I read during the conversation with the AI:")
-    _render_group(source_items,      "Evaluation of the Source — To what extent the source of these messages is:")
+    _render_group(involvement_items, "The messages I read during the conversation with the AI:")
+    _render_group(threat_items,      "The messages I read during the conversation with the AI:")
+    _render_group(source_items,      "To what extent the source of these messages is:")
 
     if st.button("Continue"):
         all_keys = [k for _, k in involvement_items + threat_items + source_items]
@@ -1393,6 +1482,7 @@ elif st.session_state.phase == 14 and not st.session_state.data_saved:
             json.dumps(st.session_state.get("opinions_others", {}),       ensure_ascii=False),
             json.dumps(st.session_state.get("messages", []),              ensure_ascii=False),
             str(st.session_state.get("att_check_response_saved", "")),
+            str(st.session_state.get("att_check_passed", "")),
             json.dumps(st.session_state.get("final_opinion", {}),         ensure_ascii=False),
             json.dumps(st.session_state.get("opinions_others_final", {}), ensure_ascii=False),
             json.dumps(st.session_state.get("tightness_responses", {}),   ensure_ascii=False),

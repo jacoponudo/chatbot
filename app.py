@@ -795,6 +795,7 @@ By clicking "I agree", you confirm that you have read and understood this inform
 elif st.session_state.phase == 0.5:
     st.markdown("We care about the quality of our survey data. For us to fully understand your opinions, it is important that you provide careful answers to each question in this survey.")
     st.markdown(
+        "Once you start the survey, you cannot refresh the page or go back to previous questions. Doing so may result in loss of progress."
         "Please note that this survey contains **attention check questions**. "
         "These are simple questions designed to verify that participants are reading carefully. "
         "**If you do not answer them correctly, you will be excluded from the study, "

@@ -262,7 +262,6 @@ def scroll_to_top_on_phase_entry():
 # LEAVE WARNING (refresh / back button)
 # ============================================================================
 def inject_leave_warning():
-    """Show a browser confirmation dialog if the user tries to leave/refresh."""
     st.components.v1.html(
         """
         <script>
@@ -271,12 +270,30 @@ def inject_leave_warning():
                 if (!win) return;
                 if (win._leaveWarningAttached) return;
                 win._leaveWarningAttached = true;
+
+                // Track if a Streamlit button was clicked (legitimate navigation)
+                win._streamlitNavigation = false;
+
+                // Intercept all button clicks inside the Streamlit app
+                win.document.addEventListener('click', function(e) {
+                    const btn = e.target.closest('button');
+                    if (btn) {
+                        win._streamlitNavigation = true;
+                        // Reset after a short delay in case the page does NOT navigate
+                        setTimeout(function() {
+                            win._streamlitNavigation = false;
+                        }, 3000);
+                    }
+                }, true);
+
                 win.addEventListener('beforeunload', function(e) {
+                    if (win._streamlitNavigation) return;
                     e.preventDefault();
-                    e.returnValue = 'If you leave or refresh this page, all your progress will be lost and you will have to start over.';
-                    return 'If you leave or refresh this page, all your progress will be lost and you will have to start over.';
+                    e.returnValue = 'If you leave or refresh this page, all your progress will be lost.';
+                    return 'If you leave or refresh this page, all your progress will be lost.';
                 });
             }
+
             attachWarning(window);
             try { attachWarning(window.parent); } catch(e) {}
             try { attachWarning(window.top); }    catch(e) {}
@@ -285,7 +302,6 @@ def inject_leave_warning():
         """,
         height=0,
     )
-
 # ============================================================================
 # LIKERT-7 HELPERS
 # ============================================================================

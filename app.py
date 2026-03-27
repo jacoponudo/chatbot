@@ -8,8 +8,7 @@ import time
 import random
 import string
 from collections import defaultdict
-# pip install streamlit-javascript
-from streamlit_javascript import st_javascript
+
 import vertexai
 from vertexai.generative_models import GenerativeModel, ChatSession
 import threading
@@ -221,8 +220,7 @@ def precompute_greeting_in_background():
 def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
     if "gemini_chat" in st.session_state:
         return st.session_state.gemini_chat
-    model = get_gemini_mod# pip install streamlit-javascript
-from streamlit_javascript import st_javascriptel()
+    model = get_gemini_model()
     chat  = model.start_chat()
     st.session_state.gemini_chat = chat
     return chat
@@ -263,6 +261,8 @@ def scroll_to_top_on_phase_entry():
 # ============================================================================
 # LEAVE WARNING (refresh / back button)
 # ============================================================================
+# pip install streamlit-javascript
+from streamlit_javascript import st_javascript
 
 def inject_leave_warning():
     if st.session_state.get("leave_warning_injected"):

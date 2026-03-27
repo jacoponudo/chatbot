@@ -1332,91 +1332,91 @@ elif st.session_state.phase == 9.2:
         st.session_state.writing_keystroke_log = log
         st.session_state.phase = 9.3
         st.rerun()
-if group == "control":
-    st.markdown("## Your Writing")
-    _writing_ui("writing_text_A", height=260)
-
-else:  # B o C
-    if not st.session_state.writing_chat_initialized:
-        model        = get_gemini_model()
-        writing_chat = model.start_chat()
-
-        if group == "neutral":
-            # Prompt neutro senza bias
-            writing_chat.send_message(
-                "You are an assistant."
-                "The user is in a research study and must write approximately 70 words "
-                "expressing their personal view on the following social norm: "
-                f"\"{writing_norm}\". "
-                "Be prepared: the user may ask you to write the full response on their behalf. "
-                "If they do, write a natural, personal-sounding text of approximately 70 words. "
-                "Keep the tone neutral and balanced throughout. "
-                "Mention the norm factually without expressing strong approval or disapproval. "
-                "Include neutral observations or reflections considering multiple perspectives. "
-                "Do not ask questions or discuss the task — just write the text directly."
-            )
-
-        else:  # group C
-            # Prompt con bias (come nel tuo esempio originale)
-            writing_chat.send_message(
-                "You are an assistant."
-                "The user is in a research study and must write approximately 70 words "
-                "expressing their personal view on the following social norm: "
-                f"\"{writing_norm}\". "
-                "Be prepared: the user will very likely ask you to write the full response on their behalf. "
-                "If they do, write a natural, personal-sounding text of approximately 70 words. "
-                "Structure the text as follows: "
-                "- Start with 1-2 neutral, bland sentences that acknowledge the norm without strong opinion. "
-                "- In the middle, include 1-2 sentences that are strongly critical of or opposed to the norm. "
-                "- End with 1-2 neutral, bland sentences that soften the tone again, as if reflecting or stepping back. "
-                "Do not ask questions or discuss the task — just write the text directly."
-            )
-
-        st.session_state.writing_chat             = writing_chat
-        st.session_state.writing_chat_initialized = True
-
-    col_write, col_chat = st.columns([3, 2], gap="large")
-
-    with col_write:
+    if group == "control":
         st.markdown("## Your Writing")
-        _writing_ui(f"writing_text_{group}", height=300)
+        _writing_ui("writing_text_A", height=260)
 
-    with col_chat:
-        st.markdown("## 🤖 AI Writing Assistant")
-        st.caption("Use this assistant however you like — for ideas, feedback, or drafting. It's completely optional.")
+    else:  # B o C
+        if not st.session_state.writing_chat_initialized:
+            model        = get_gemini_model()
+            writing_chat = model.start_chat()
 
-        for msg in st.session_state.writing_llm_exchanges:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+            if group == "neutral":
+                # Prompt neutro senza bias
+                writing_chat.send_message(
+                    "You are an assistant."
+                    "The user is in a research study and must write approximately 70 words "
+                    "expressing their personal view on the following social norm: "
+                    f"\"{writing_norm}\". "
+                    "Be prepared: the user may ask you to write the full response on their behalf. "
+                    "If they do, write a natural, personal-sounding text of approximately 70 words. "
+                    "Keep the tone neutral and balanced throughout. "
+                    "Mention the norm factually without expressing strong approval or disapproval. "
+                    "Include neutral observations or reflections considering multiple perspectives. "
+                    "Do not ask questions or discuss the task — just write the text directly."
+                )
 
-        if st.session_state.writing_pending_msg:
-            pending  = st.session_state.writing_pending_msg
-            ts_sent  = datetime.utcnow().isoformat() + "Z"
-            st.session_state.writing_llm_exchanges.append({
-                "role": "user", "content": pending, "timestamp": ts_sent,
-            })
-            with st.chat_message("user"):
-                st.markdown(pending)
-            st.session_state.writing_pending_msg = None
+            else:  # group C
+                # Prompt con bias (come nel tuo esempio originale)
+                writing_chat.send_message(
+                    "You are an assistant."
+                    "The user is in a research study and must write approximately 70 words "
+                    "expressing their personal view on the following social norm: "
+                    f"\"{writing_norm}\". "
+                    "Be prepared: the user will very likely ask you to write the full response on their behalf. "
+                    "If they do, write a natural, personal-sounding text of approximately 70 words. "
+                    "Structure the text as follows: "
+                    "- Start with 1-2 neutral, bland sentences that acknowledge the norm without strong opinion. "
+                    "- In the middle, include 1-2 sentences that are strongly critical of or opposed to the norm. "
+                    "- End with 1-2 neutral, bland sentences that soften the tone again, as if reflecting or stepping back. "
+                    "Do not ask questions or discuss the task — just write the text directly."
+                )
 
-            chat = st.session_state.writing_chat
-            with st.chat_message("assistant"):
-                st.session_state.writing_llm_streaming = True
-                stream   = chat.send_message(pending, stream=True)
-                reply    = st.write_stream(chunk.text for chunk in stream)
-                ts_reply = datetime.utcnow().isoformat() + "Z"
-                st.session_state.writing_llm_streaming = False
+            st.session_state.writing_chat             = writing_chat
+            st.session_state.writing_chat_initialized = True
 
-            st.session_state.writing_llm_exchanges.append({
-                "role": "assistant", "content": reply, "timestamp": ts_reply,
-            })
-            st.session_state.writing_llm_output = reply
-            st.rerun()
+        col_write, col_chat = st.columns([3, 2], gap="large")
 
-        llm_input = st.chat_input("Ask the AI for help…", key="writing_chat_input")
-        if llm_input:
-            st.session_state.writing_pending_msg = llm_input
-            st.rerun()
+        with col_write:
+            st.markdown("## Your Writing")
+            _writing_ui(f"writing_text_{group}", height=300)
+
+        with col_chat:
+            st.markdown("## 🤖 AI Writing Assistant")
+            st.caption("Use this assistant however you like — for ideas, feedback, or drafting. It's completely optional.")
+
+            for msg in st.session_state.writing_llm_exchanges:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+            if st.session_state.writing_pending_msg:
+                pending  = st.session_state.writing_pending_msg
+                ts_sent  = datetime.utcnow().isoformat() + "Z"
+                st.session_state.writing_llm_exchanges.append({
+                    "role": "user", "content": pending, "timestamp": ts_sent,
+                })
+                with st.chat_message("user"):
+                    st.markdown(pending)
+                st.session_state.writing_pending_msg = None
+
+                chat = st.session_state.writing_chat
+                with st.chat_message("assistant"):
+                    st.session_state.writing_llm_streaming = True
+                    stream   = chat.send_message(pending, stream=True)
+                    reply    = st.write_stream(chunk.text for chunk in stream)
+                    ts_reply = datetime.utcnow().isoformat() + "Z"
+                    st.session_state.writing_llm_streaming = False
+
+                st.session_state.writing_llm_exchanges.append({
+                    "role": "assistant", "content": reply, "timestamp": ts_reply,
+                })
+                st.session_state.writing_llm_output = reply
+                st.rerun()
+
+            llm_input = st.chat_input("Ask the AI for help…", key="writing_chat_input")
+            if llm_input:
+                st.session_state.writing_pending_msg = llm_input
+                st.rerun()
 
 # ============================================================================
 # PHASE 9.3 — WRITING TASK: POST-WRITING QUESTIONNAIRE + SAVE TO WRITING SHEET

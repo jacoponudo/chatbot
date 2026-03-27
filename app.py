@@ -262,7 +262,13 @@ def scroll_to_top_on_phase_entry():
 # LEAVE WARNING (refresh / back button)
 # ============================================================================
 def inject_leave_warning():
-    """Show a browser confirmation dialog if the user tries to leave/refresh."""
+    # Only inject once per session — re-injecting on every rerun causes
+    # multiple listeners to stack up and resets the navigation flag,
+    # triggering false positives on every Continue button click.
+    if st.session_state.get("leave_warning_injected"):
+        return
+    st.session_state.leave_warning_injected = True
+
     st.components.v1.html(
         """
         <script>
@@ -271,12 +277,26 @@ def inject_leave_warning():
                 if (!win) return;
                 if (win._leaveWarningAttached) return;
                 win._leaveWarningAttached = true;
+                win._streamlitNavigation = false;
+
+                win.document.addEventListener('click', function(e) {
+                    const btn = e.target.closest('button');
+                    if (btn) {
+                        win._streamlitNavigation = true;
+                        setTimeout(function() {
+                            win._streamlitNavigation = false;
+                        }, 3000);
+                    }
+                }, true);
+
                 win.addEventListener('beforeunload', function(e) {
+                    if (win._streamlitNavigation) return;
                     e.preventDefault();
-                    e.returnValue = 'If you leave or refresh this page, all your progress will be lost and you will have to start over.';
-                    return 'If you leave or refresh this page, all your progress will be lost and you will have to start over.';
+                    e.returnValue = 'If you leave or refresh this page, all your progress will be lost.';
+                    return 'If you leave or refresh this page, all your progress will be lost.';
                 });
             }
+
             attachWarning(window);
             try { attachWarning(window.parent); } catch(e) {}
             try { attachWarning(window.top); }    catch(e) {}
@@ -563,8 +583,8 @@ scroll_to_top_on_phase_entry()
 # LEAVE WARNING — active for all phases between 1 and 13 inclusive
 # (not on consent/intro screens, not on termination, not after submission)
 # ============================================================================
-_active_phases = {2, 3, 4, 5, 6, 7, 8, 9, 9.1, 9.2, 9.3, 10, 11, 12, 13, 14}
-if st.session_state.phase in _active_phases:
+# Inject once when the participant enters the first "active" phase
+if st.session_state.phase >= 0 and not st.session_state.get("leave_warning_injected"):
     inject_leave_warning()
 # ============================================================================
 # PHASE -1 — EARLY TERMINATION

@@ -270,31 +270,43 @@ def inject_leave_warning():
         """
         <script>
         (function() {
-            // Target the top-level window, not the iframe
             var win = window.parent || window;
             if (win._leaveWarningAttached) return;
             win._leaveWarningAttached = true;
 
-            // Use pagehide instead of beforeunload —
-            // pagehide only fires on real navigation/tab close,
-            // NOT on Streamlit internal reruns or websocket messages.
-            // We add a synchronous beforeunload ONLY as fallback for
-            // browsers that don't support pagehide well (rare).
+            // Streamlit reconnects its WebSocket every ~few seconds.
+            // A real browser navigation fires beforeunload AND immediately
+            // removes the page. A Streamlit internal rerun fires beforeunload
+            // but the WebSocket reconnects within ~200ms.
             //
-            // The key insight: Streamlit reruns do NOT trigger pagehide.
-            // They only trigger websocket frame exchanges internally.
+            // Strategy: track whether the Streamlit WebSocket is alive.
+            // If it just reconnected very recently (<500ms), this is a
+            // Streamlit rerun — suppress the dialog.
+
+            var lastWsActivity = Date.now();
+
+            // Monkey-patch WebSocket to track the last activity timestamp
+            var OrigWS = win.WebSocket;
+            win.WebSocket = function(url, protocols) {
+                var ws = protocols ? new OrigWS(url, protocols) : new OrigWS(url);
+                ws.addEventListener('message', function() {
+                    lastWsActivity = Date.now();
+                });
+                ws.addEventListener('open', function() {
+                    lastWsActivity = Date.now();
+                });
+                return ws;
+            };
+            win.WebSocket.prototype = OrigWS.prototype;
 
             win.addEventListener('beforeunload', function(e) {
-                // Only show dialog if the page is actually unloading
-                // (not a Streamlit rerun). We detect this by checking
-                // whether the Streamlit websocket is still connected.
-                // If it is, this is a real navigation attempt.
-                var stDoc = win.document;
-                var stFrame = stDoc.querySelector('iframe[title="streamlit_components"]');
-                // Show warning
+                // If a WebSocket message arrived in the last 800ms,
+                // this is almost certainly a Streamlit rerun — do nothing.
+                if (Date.now() - lastWsActivity < 800) return;
+
                 e.preventDefault();
-                e.returnValue = '';
-                return '';
+                e.returnValue = 'Your progress will be lost if you leave. Are you sure?';
+                return 'Your progress will be lost if you leave. Are you sure?';
             });
         })();
         </script>

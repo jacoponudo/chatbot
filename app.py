@@ -611,75 +611,81 @@ elif st.session_state.phase == 0:
         "Science and Technologies (ISTC)** of the National Research Council and **Sapienza University of Rome**."
     )
     st.markdown(
-        "You are accessing the study by logging in with your Prolific ID. This is the only information "
-        "researchers will obtain from you via Prolific. The data you share with Prolific are treated in "
-        "full compliance with GDPR. The study will be carried out as an online survey programmed in Streamlit. "
-        "All personal data about you will be collected through the survey from you — we do not obtain "
-        "information about you from any other sources. Your personal data will not be used for automated "
-        "decision-making including profiling."
+        "Please read the full informed consent document before proceeding. "
+        "Click the section below to expand it."
     )
-
-    st.markdown("### Data")
-    st.markdown(
-        "To carry out this processing operation the following categories of personal data may be processed:\n\n"
-        "- **Socio-demographic information** (age, gender, educational level, income)\n"
-        "- **Responses** to the questions included in the survey\n\n"
-        "In addition, the survey tool may register:\n\n"
-        "- **IP address and geolocation** of the respondent.\n\n"
-        "These data will **not** be downloaded or processed by ISTC or Sapienza University of Rome and "
-        "will remain on the server of the survey tool for as long as required (see Data Retention below).\n\n"
-        "You may spontaneously provide other non-requested personal data in open-text replies. "
-        "The Data Controller does not request nor expect special categories of data under Article 10(1) "
-        "of Regulation 2018/1725 (data revealing racial or ethnic origin, political opinions, religious "
-        "or philosophical beliefs, trade union membership, genetic/biometric data, health data, or data "
-        "concerning sex life or sexual orientation). Any spontaneous inclusion of these types of data is "
-        "the responsibility of the data subject and constitutes explicit consent under Article 10(2)(a) "
-        "of Regulation 2018/1725.\n\n"
-        "All data collected will be treated in accordance with **GDPR 2016/679** and the analogous "
-        "Italian regulation (Legislative Decree 30 June 2003, n. 196)."
-    )
-
-    st.markdown("### Role and Contacts")
-    st.markdown(
-        "- **Data Controller** (Art. 13, par. 1, letter a): Institute for Cognitive Science and "
-        "Technologies, ISTC-CNR — direzione.istc@istc.cnr.it — Tel: 06 44595246\n"
-        "- **Data Protection Officer** (Art. 13, par. 1, letter b): rpd@cnr.it"
-    )
-
-    st.markdown("### Purposes for Data Processing, Transfer and Retention")
-    st.markdown(
-        "- **Purpose** (Art. 13, par. 1, letter c): Data collected will be used exclusively for the "
-        "research purposes described above.\n"
-        "- **Recipients** (Art. 13, par. 1, letter e): Access is reserved exclusively for researchers "
-        "authorised by the Director of ISTC-CNR. The list is available at jacopo.nudo@uniroma1.it.\n"
-        "- **Data transfer to third countries** (Art. 13, par. 1, letter f): Data will **not** be "
-        "transferred to third countries.\n"
-        "- **Data retention** (Art. 13, par. 2, letter a): Data will be kept on a secure server at Google. "
-        "Access by Google is restricted and requires authorisation.\n"
-        "- **Processing for other purposes** (Art. 13, par. 3): Data will be used exclusively for the "
-        "research purposes described above."
-    )
-
-    st.markdown("### Your Rights")
-    st.markdown(
-        "- **Right of access, rectification, cancellation or limitation** (Art. 13, par. 2, letter b): "
-        "You may request access to data at any time within 3 years of processing and have the right to "
-        "have it removed, rectified, or restricted, including data portability.\n"
-        "- **Right to withdraw consent** (Art. 13, par. 2, letter c): You may revoke your consent within "
-        "3 years by contacting us and asking not to use your data.\n"
-        "- **Right to lodge a complaint** (Art. 13, par. 2, letter d): Within 3 years of the treatment "
-        "you may lodge a complaint with the Data Protection Authority.\n"
-        "- **Providing personal data** (Art. 13, par. 2, letter e): By participating you accept all the "
-        "purposes described above and provide the Data Controller with your personal data.\n\n"
-        "To exercise your rights, write to **jacopo.nudo@uniroma1.it** including your Prolific ID."
-    )
-
-    st.markdown("### Legal Basis")
-    st.markdown(
-        "Legal basis (Art. 9, par. 2, letter a): the processing is legally authorised with the "
-        "explicit acceptance of this Informed Consent."
-    )
-
+ 
+    with st.expander("📄 Read the full informed consent", expanded=False):
+        st.markdown(
+            "You are accessing the study by logging in with your Prolific ID. This is the only information "
+            "researchers will obtain from you via Prolific. The data you share with Prolific are treated in "
+            "full compliance with GDPR. The study will be carried out as an online survey programmed in Streamlit. "
+            "All personal data about you will be collected through the survey from you — we do not obtain "
+            "information about you from any other sources. Your personal data will not be used for automated "
+            "decision-making including profiling."
+        )
+ 
+        st.markdown("### Data")
+        st.markdown(
+            "To carry out this processing operation the following categories of personal data may be processed:\n\n"
+            "- **Socio-demographic information** (age, gender, educational level, income)\n"
+            "- **Responses** to the questions included in the survey\n\n"
+            "In addition, the survey tool may register:\n\n"
+            "- **IP address and geolocation** of the respondent.\n\n"
+            "These data will **not** be downloaded or processed by ISTC or Sapienza University of Rome and "
+            "will remain on the server of the survey tool for as long as required (see Data Retention below).\n\n"
+            "You may spontaneously provide other non-requested personal data in open-text replies. "
+            "The Data Controller does not request nor expect special categories of data under Article 10(1) "
+            "of Regulation 2018/1725 (data revealing racial or ethnic origin, political opinions, religious "
+            "or philosophical beliefs, trade union membership, genetic/biometric data, health data, or data "
+            "concerning sex life or sexual orientation). Any spontaneous inclusion of these types of data is "
+            "the responsibility of the data subject and constitutes explicit consent under Article 10(2)(a) "
+            "of Regulation 2018/1725.\n\n"
+            "All data collected will be treated in accordance with **GDPR 2016/679** and the analogous "
+            "Italian regulation (Legislative Decree 30 June 2003, n. 196)."
+        )
+ 
+        st.markdown("### Role and Contacts")
+        st.markdown(
+            "- **Data Controller** (Art. 13, par. 1, letter a): Institute for Cognitive Science and "
+            "Technologies, ISTC-CNR — direzione.istc@istc.cnr.it — Tel: 06 44595246\n"
+            "- **Data Protection Officer** (Art. 13, par. 1, letter b): rpd@cnr.it"
+        )
+ 
+        st.markdown("### Purposes for Data Processing, Transfer and Retention")
+        st.markdown(
+            "- **Purpose** (Art. 13, par. 1, letter c): Data collected will be used exclusively for the "
+            "research purposes described above.\n"
+            "- **Recipients** (Art. 13, par. 1, letter e): Access is reserved exclusively for researchers "
+            "authorised by the Director of ISTC-CNR. The list is available at jacopo.nudo@uniroma1.it.\n"
+            "- **Data transfer to third countries** (Art. 13, par. 1, letter f): Data will **not** be "
+            "transferred to third countries.\n"
+            "- **Data retention** (Art. 13, par. 2, letter a): Data will be kept on a secure server at Google. "
+            "Access by Google is restricted and requires authorisation.\n"
+            "- **Processing for other purposes** (Art. 13, par. 3): Data will be used exclusively for the "
+            "research purposes described above."
+        )
+ 
+        st.markdown("### Your Rights")
+        st.markdown(
+            "- **Right of access, rectification, cancellation or limitation** (Art. 13, par. 2, letter b): "
+            "You may request access to data at any time within 3 years of processing and have the right to "
+            "have it removed, rectified, or restricted, including data portability.\n"
+            "- **Right to withdraw consent** (Art. 13, par. 2, letter c): You may revoke your consent within "
+            "3 years by contacting us and asking not to use your data.\n"
+            "- **Right to lodge a complaint** (Art. 13, par. 2, letter d): Within 3 years of the treatment "
+            "you may lodge a complaint with the Data Protection Authority.\n"
+            "- **Providing personal data** (Art. 13, par. 2, letter e): By participating you accept all the "
+            "purposes described above and provide the Data Controller with your personal data.\n\n"
+            "To exercise your rights, write to **jacopo.nudo@uniroma1.it** including your Prolific ID."
+        )
+ 
+        st.markdown("### Legal Basis")
+        st.markdown(
+            "Legal basis (Art. 9, par. 2, letter a): the processing is legally authorised with the "
+            "explicit acceptance of this Informed Consent."
+        )
+ 
     st.markdown("---")
     st.markdown("### Declaration")
     st.markdown(
@@ -695,7 +701,7 @@ elif st.session_state.phase == 0:
         "- I am aware that data recorded during the study can only be viewed by specifically authorised "
         "personnel and allow these persons to access data relevant to this study."
     )
-
+ 
     gdpr_consent = st.radio(
         "Your response:",
         options=[
@@ -705,7 +711,7 @@ elif st.session_state.phase == 0:
         index=None,
         key="gdpr_consent_radio",
     )
-
+ 
     if gdpr_consent is not None:
         if st.button("Continue"):
             if gdpr_consent.startswith("Yes"):
@@ -714,7 +720,6 @@ elif st.session_state.phase == 0:
             else:
                 st.session_state.phase = -1
                 st.rerun()
-
 # ============================================================================
 # PHASE 0.25 — STUDY CONSENT FORM
 # ============================================================================

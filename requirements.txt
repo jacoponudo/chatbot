@@ -8,3 +8,4 @@ google-auth>=2.0.0
 vertexai
 streamlit_autorefresh
 captcha
+streamlit_javascript

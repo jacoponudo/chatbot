@@ -266,52 +266,37 @@ def inject_leave_warning():
         return
     st.session_state.leave_warning_injected = True
 
-    st.components.v1.html(
+    # Inietta nel DOM principale, NON in un iframe
+    st.markdown(
         """
         <script>
         (function() {
-            var win = window.parent || window;
-            if (win._leaveWarningAttached) return;
-            win._leaveWarningAttached = true;
+            if (window._leaveWarningAttached) return;
+            window._leaveWarningAttached = true;
 
-            // Streamlit reconnects its WebSocket every ~few seconds.
-            // A real browser navigation fires beforeunload AND immediately
-            // removes the page. A Streamlit internal rerun fires beforeunload
-            // but the WebSocket reconnects within ~200ms.
-            //
-            // Strategy: track whether the Streamlit WebSocket is alive.
-            // If it just reconnected very recently (<500ms), this is a
-            // Streamlit rerun — suppress the dialog.
+            var lastRerun = Date.now();
 
-            var lastWsActivity = Date.now();
-
-            // Monkey-patch WebSocket to track the last activity timestamp
-            var OrigWS = win.WebSocket;
-            win.WebSocket = function(url, protocols) {
-                var ws = protocols ? new OrigWS(url, protocols) : new OrigWS(url);
-                ws.addEventListener('message', function() {
-                    lastWsActivity = Date.now();
-                });
-                ws.addEventListener('open', function() {
-                    lastWsActivity = Date.now();
-                });
+            // Intercetta i messaggi WebSocket di Streamlit
+            // per distinguere rerun interni da navigazione reale
+            var _origWS = window.WebSocket;
+            function PatchedWS(url, proto) {
+                var ws = proto ? new _origWS(url, proto) : new _origWS(url);
+                ws.addEventListener('message', function() { lastRerun = Date.now(); });
+                ws.addEventListener('open',    function() { lastRerun = Date.now(); });
                 return ws;
-            };
-            win.WebSocket.prototype = OrigWS.prototype;
+            }
+            PatchedWS.prototype = _origWS.prototype;
+            window.WebSocket = PatchedWS;
 
-            win.addEventListener('beforeunload', function(e) {
-                // If a WebSocket message arrived in the last 800ms,
-                // this is almost certainly a Streamlit rerun — do nothing.
-                if (Date.now() - lastWsActivity < 800) return;
-
+            window.addEventListener('beforeunload', function(e) {
+                if (Date.now() - lastRerun < 1000) return;
                 e.preventDefault();
-                e.returnValue = 'Your progress will be lost if you leave. Are you sure?';
-                return 'Your progress will be lost if you leave. Are you sure?';
+                e.returnValue = '';
             });
         })();
         </script>
         """,
-        height=0,
+        unsafe_allow_html=True,
     )
 # ============================================================================
 # LIKERT-7 HELPERS

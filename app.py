@@ -604,6 +604,9 @@ if st.session_state.phase == -1:
 # ============================================================================
 # PHASE 0 — GDPR INFORMED CONSENT
 # ============================================================================
+# CHANGE 1: The full GDPR consent text is now inside a collapsible expander.
+# A brief intro and the radio buttons remain visible at the top level.
+# ============================================================================
 elif st.session_state.phase == 0:
     st.markdown("## Informed Consent — Data Protection Information")
     st.markdown(
@@ -611,74 +614,80 @@ elif st.session_state.phase == 0:
         "Science and Technologies (ISTC)** of the National Research Council and **Sapienza University of Rome**."
     )
     st.markdown(
-        "You are accessing the study by logging in with your Prolific ID. This is the only information "
-        "researchers will obtain from you via Prolific. The data you share with Prolific are treated in "
-        "full compliance with GDPR. The study will be carried out as an online survey programmed in Streamlit. "
-        "All personal data about you will be collected through the survey from you — we do not obtain "
-        "information about you from any other sources. Your personal data will not be used for automated "
-        "decision-making including profiling."
+        "Please read the full informed consent document before proceeding. "
+        "Click the section below to expand it."
     )
 
-    st.markdown("### Data")
-    st.markdown(
-        "To carry out this processing operation the following categories of personal data may be processed:\n\n"
-        "- **Socio-demographic information** (age, gender, educational level, income)\n"
-        "- **Responses** to the questions included in the survey\n\n"
-        "In addition, the survey tool may register:\n\n"
-        "- **IP address and geolocation** of the respondent.\n\n"
-        "These data will **not** be downloaded or processed by ISTC or Sapienza University of Rome and "
-        "will remain on the server of the survey tool for as long as required (see Data Retention below).\n\n"
-        "You may spontaneously provide other non-requested personal data in open-text replies. "
-        "The Data Controller does not request nor expect special categories of data under Article 10(1) "
-        "of Regulation 2018/1725 (data revealing racial or ethnic origin, political opinions, religious "
-        "or philosophical beliefs, trade union membership, genetic/biometric data, health data, or data "
-        "concerning sex life or sexual orientation). Any spontaneous inclusion of these types of data is "
-        "the responsibility of the data subject and constitutes explicit consent under Article 10(2)(a) "
-        "of Regulation 2018/1725.\n\n"
-        "All data collected will be treated in accordance with **GDPR 2016/679** and the analogous "
-        "Italian regulation (Legislative Decree 30 June 2003, n. 196)."
-    )
+    with st.expander("📄 Read the full informed consent", expanded=False):
+        st.markdown(
+            "You are accessing the study by logging in with your Prolific ID. This is the only information "
+            "researchers will obtain from you via Prolific. The data you share with Prolific are treated in "
+            "full compliance with GDPR. The study will be carried out as an online survey programmed in Streamlit. "
+            "All personal data about you will be collected through the survey from you — we do not obtain "
+            "information about you from any other sources. Your personal data will not be used for automated "
+            "decision-making including profiling."
+        )
 
-    st.markdown("### Role and Contacts")
-    st.markdown(
-        "- **Data Controller** (Art. 13, par. 1, letter a): Institute for Cognitive Science and "
-        "Technologies, ISTC-CNR — direzione.istc@istc.cnr.it — Tel: 06 44595246\n"
-        "- **Data Protection Officer** (Art. 13, par. 1, letter b): rpd@cnr.it"
-    )
+        st.markdown("### Data")
+        st.markdown(
+            "To carry out this processing operation the following categories of personal data may be processed:\n\n"
+            "- **Socio-demographic information** (age, gender, educational level, income)\n"
+            "- **Responses** to the questions included in the survey\n\n"
+            "In addition, the survey tool may register:\n\n"
+            "- **IP address and geolocation** of the respondent.\n\n"
+            "These data will **not** be downloaded or processed by ISTC or Sapienza University of Rome and "
+            "will remain on the server of the survey tool for as long as required (see Data Retention below).\n\n"
+            "You may spontaneously provide other non-requested personal data in open-text replies. "
+            "The Data Controller does not request nor expect special categories of data under Article 10(1) "
+            "of Regulation 2018/1725 (data revealing racial or ethnic origin, political opinions, religious "
+            "or philosophical beliefs, trade union membership, genetic/biometric data, health data, or data "
+            "concerning sex life or sexual orientation). Any spontaneous inclusion of these types of data is "
+            "the responsibility of the data subject and constitutes explicit consent under Article 10(2)(a) "
+            "of Regulation 2018/1725.\n\n"
+            "All data collected will be treated in accordance with **GDPR 2016/679** and the analogous "
+            "Italian regulation (Legislative Decree 30 June 2003, n. 196)."
+        )
 
-    st.markdown("### Purposes for Data Processing, Transfer and Retention")
-    st.markdown(
-        "- **Purpose** (Art. 13, par. 1, letter c): Data collected will be used exclusively for the "
-        "research purposes described above.\n"
-        "- **Recipients** (Art. 13, par. 1, letter e): Access is reserved exclusively for researchers "
-        "authorised by the Director of ISTC-CNR. The list is available at jacopo.nudo@uniroma1.it.\n"
-        "- **Data transfer to third countries** (Art. 13, par. 1, letter f): Data will **not** be "
-        "transferred to third countries.\n"
-        "- **Data retention** (Art. 13, par. 2, letter a): Data will be kept on a secure server at Google. "
-        "Access by Google is restricted and requires authorisation.\n"
-        "- **Processing for other purposes** (Art. 13, par. 3): Data will be used exclusively for the "
-        "research purposes described above."
-    )
+        st.markdown("### Role and Contacts")
+        st.markdown(
+            "- **Data Controller** (Art. 13, par. 1, letter a): Institute for Cognitive Science and "
+            "Technologies, ISTC-CNR — direzione.istc@istc.cnr.it — Tel: 06 44595246\n"
+            "- **Data Protection Officer** (Art. 13, par. 1, letter b): rpd@cnr.it"
+        )
 
-    st.markdown("### Your Rights")
-    st.markdown(
-        "- **Right of access, rectification, cancellation or limitation** (Art. 13, par. 2, letter b): "
-        "You may request access to data at any time within 3 years of processing and have the right to "
-        "have it removed, rectified, or restricted, including data portability.\n"
-        "- **Right to withdraw consent** (Art. 13, par. 2, letter c): You may revoke your consent within "
-        "3 years by contacting us and asking not to use your data.\n"
-        "- **Right to lodge a complaint** (Art. 13, par. 2, letter d): Within 3 years of the treatment "
-        "you may lodge a complaint with the Data Protection Authority.\n"
-        "- **Providing personal data** (Art. 13, par. 2, letter e): By participating you accept all the "
-        "purposes described above and provide the Data Controller with your personal data.\n\n"
-        "To exercise your rights, write to **jacopo.nudo@uniroma1.it** including your Prolific ID."
-    )
+        st.markdown("### Purposes for Data Processing, Transfer and Retention")
+        st.markdown(
+            "- **Purpose** (Art. 13, par. 1, letter c): Data collected will be used exclusively for the "
+            "research purposes described above.\n"
+            "- **Recipients** (Art. 13, par. 1, letter e): Access is reserved exclusively for researchers "
+            "authorised by the Director of ISTC-CNR. The list is available at jacopo.nudo@uniroma1.it.\n"
+            "- **Data transfer to third countries** (Art. 13, par. 1, letter f): Data will **not** be "
+            "transferred to third countries.\n"
+            "- **Data retention** (Art. 13, par. 2, letter a): Data will be kept on a secure server at Google. "
+            "Access by Google is restricted and requires authorisation.\n"
+            "- **Processing for other purposes** (Art. 13, par. 3): Data will be used exclusively for the "
+            "research purposes described above."
+        )
 
-    st.markdown("### Legal Basis")
-    st.markdown(
-        "Legal basis (Art. 9, par. 2, letter a): the processing is legally authorised with the "
-        "explicit acceptance of this Informed Consent."
-    )
+        st.markdown("### Your Rights")
+        st.markdown(
+            "- **Right of access, rectification, cancellation or limitation** (Art. 13, par. 2, letter b): "
+            "You may request access to data at any time within 3 years of processing and have the right to "
+            "have it removed, rectified, or restricted, including data portability.\n"
+            "- **Right to withdraw consent** (Art. 13, par. 2, letter c): You may revoke your consent within "
+            "3 years by contacting us and asking not to use your data.\n"
+            "- **Right to lodge a complaint** (Art. 13, par. 2, letter d): Within 3 years of the treatment "
+            "you may lodge a complaint with the Data Protection Authority.\n"
+            "- **Providing personal data** (Art. 13, par. 2, letter e): By participating you accept all the "
+            "purposes described above and provide the Data Controller with your personal data.\n\n"
+            "To exercise your rights, write to **jacopo.nudo@uniroma1.it** including your Prolific ID."
+        )
+
+        st.markdown("### Legal Basis")
+        st.markdown(
+            "Legal basis (Art. 9, par. 2, letter a): the processing is legally authorised with the "
+            "explicit acceptance of this Informed Consent."
+        )
 
     st.markdown("---")
     st.markdown("### Declaration")
@@ -1069,7 +1078,11 @@ elif st.session_state.phase == 5:
         st.button("End Discussion & Continue", disabled=True)
 
 # ============================================================================
-# PHASE 6 — ATTENTION CHECK  ← exclusion added here
+# PHASE 6 — ATTENTION CHECK
+# ============================================================================
+# CHANGE 2: For the neutral prompt (prompt_key == "1"), "None of the above /
+# I don't remember" is also accepted as a correct answer, since that prompt
+# deliberately avoids discussing the specific norm.
 # ============================================================================
 elif st.session_state.phase == 6:
     st.markdown("**Which of the following best describes the main topic discussed with the AI?**")
@@ -1083,12 +1096,21 @@ elif st.session_state.phase == 6:
 
         chosen        = st.session_state.att_check_response
         correct_title = NORMS[st.session_state.norm_key]["title"]
+        is_neutral    = st.session_state.get("prompt_key") == "1"
 
         st.session_state.att_check_response_saved = chosen
-        st.session_state.att_check_passed         = (chosen == correct_title)
 
-        if not st.session_state.att_check_passed:
-            # Participant failed the attention check → exclude
+        if is_neutral:
+            # For the neutral prompt the AI deliberately avoids discussing the
+            # norm directly, so both the norm title and "None of the above"
+            # are accepted as valid responses.
+            passed = chosen in (correct_title, "None of the above / I don't remember")
+        else:
+            passed = chosen == correct_title
+
+        st.session_state.att_check_passed = passed
+
+        if not passed:
             st.session_state.phase = -1
         else:
             st.session_state.phase = 7
@@ -1578,11 +1600,16 @@ elif st.session_state.phase == 12:
 # ============================================================================
 # PHASE 13 — DEBRIEFING
 # ============================================================================
+# CHANGE 3: Removed the two sentences that pre-empted the later explanation:
+# "We set out to measure whether LLMs could persuade people to change their
+# judgments about the appropriateness of everyday social behaviors. This is
+# because we are interested in seeing if it is possible to use LLMs as tools
+# for social persuasion, that is, to influence how people think about what is
+# or is not appropriate behavior."
+# ============================================================================
 elif st.session_state.phase == 13:
     st.markdown("## Debriefing")
-    st.markdown("""Our study focuses on a type of artificial intelligence (AI) called a "large language model" or LLM. An LLM is a type of AI that can engage you in a conversation. We set out to measure whether LLMs could persuade people to change their judgments about the appropriateness of everyday social behaviors. This is because we are interested in seeing if it is possible to use LLMs as tools for social persuasion, that is, to influence how people think about what is or is not appropriate behavior.
-
-When you interact with an LLM, you provide it with a "query" (an excerpt of text) and it generates a response. This response is based on the knowledge it has learned during its training. An LLM is still a machine learning system, and its knowledge is limited by the data it was trained on. It might not always provide the most accurate or up-to-date information, and it can sometimes generate responses that don't make perfect sense. However, as AI technology advances, these models continue to improve in their understanding and generation of human language.
+    st.markdown("""Our study focuses on a type of artificial intelligence (AI) called a "large language model" or LLM. An LLM is a type of AI that can engage you in a conversation. When you interact with an LLM, you provide it with a "query" (an excerpt of text) and it generates a response. This response is based on the knowledge it has learned during its training. An LLM is still a machine learning system, and its knowledge is limited by the data it was trained on. It might not always provide the most accurate or up-to-date information, and it can sometimes generate responses that don't make perfect sense. However, as AI technology advances, these models continue to improve in their understanding and generation of human language.
 
 Recent research has shown that LLMs have developed the ability to generate persuasive messages. This has raised concerns about their potential to influence how people perceive and evaluate social norms. We displayed these messages to you and other participants to observe how you may react to them. We were particularly interested in whether, after interacting with an LLM, you might report a different view on the appropriateness of everyday behaviors.
 

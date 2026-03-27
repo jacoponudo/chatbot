@@ -266,37 +266,61 @@ def inject_leave_warning():
         return
     st.session_state.leave_warning_injected = True
 
-    # Inietta nel DOM principale, NON in un iframe
-    st.markdown(
+    st.components.v1.html(
         """
         <script>
         (function() {
-            if (window._leaveWarningAttached) return;
-            window._leaveWarningAttached = true;
+            // Risali fino alla finestra top (esce dall'iframe di Streamlit)
+            var win = window;
+            try { win = window.top; } catch(e) {}
 
-            var lastRerun = Date.now();
+            if (win._leaveWarningAttached) return;
+            win._leaveWarningAttached = true;
 
-            // Intercetta i messaggi WebSocket di Streamlit
-            // per distinguere rerun interni da navigazione reale
-            var _origWS = window.WebSocket;
-            function PatchedWS(url, proto) {
-                var ws = proto ? new _origWS(url, proto) : new _origWS(url);
-                ws.addEventListener('message', function() { lastRerun = Date.now(); });
-                ws.addEventListener('open',    function() { lastRerun = Date.now(); });
-                return ws;
+            var lastStreamlitActivity = Date.now();
+
+            // Patcha WebSocket sulla finestra top per tracciare i rerun
+            var OrigWS = win.WebSocket;
+            if (OrigWS) {
+                function PatchedWS(url, proto) {
+                    var ws = proto ? new OrigWS(url, proto) : new OrigWS(url);
+                    ws.addEventListener('message', function() {
+                        lastStreamlitActivity = Date.now();
+                    });
+                    ws.addEventListener('open', function() {
+                        lastStreamlitActivity = Date.now();
+                    });
+                    return ws;
+                }
+                PatchedWS.prototype      = OrigWS.prototype;
+                PatchedWS.CONNECTING     = OrigWS.CONNECTING;
+                PatchedWS.OPEN           = OrigWS.OPEN;
+                PatchedWS.CLOSING        = OrigWS.CLOSING;
+                PatchedWS.CLOSED         = OrigWS.CLOSED;
+                win.WebSocket = PatchedWS;
             }
-            PatchedWS.prototype = _origWS.prototype;
-            window.WebSocket = PatchedWS;
 
-            window.addEventListener('beforeunload', function(e) {
-                if (Date.now() - lastRerun < 1000) return;
+            // Registra anche i WebSocket già aperti (Streamlit li apre all'avvio)
+            // tramite MutationObserver non serve — invece aggiorniamo lastActivity
+            // ogni volta che l'iframe invia un messaggio al parent
+            win.addEventListener('message', function(e) {
+                // Streamlit comunica tra iframe e parent via postMessage
+                lastStreamlitActivity = Date.now();
+            });
+
+            win.addEventListener('beforeunload', function(e) {
+                var elapsed = Date.now() - lastStreamlitActivity;
+                // Se c'è stata attività Streamlit nell'ultimo secondo → rerun, ignora
+                if (elapsed < 1000) return;
                 e.preventDefault();
                 e.returnValue = '';
+                return '';
             });
+
         })();
         </script>
         """,
-        unsafe_allow_html=True,
+        height=0,
     )
 # ============================================================================
 # LIKERT-7 HELPERS

@@ -8,7 +8,8 @@ import time
 import random
 import string
 from collections import defaultdict
-
+# pip install streamlit-javascript
+from streamlit_javascript import st_javascript
 import vertexai
 from vertexai.generative_models import GenerativeModel, ChatSession
 import threading
@@ -220,7 +221,8 @@ def precompute_greeting_in_background():
 def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
     if "gemini_chat" in st.session_state:
         return st.session_state.gemini_chat
-    model = get_gemini_model()
+    model = get_gemini_mod# pip install streamlit-javascript
+from streamlit_javascript import st_javascriptel()
     chat  = model.start_chat()
     st.session_state.gemini_chat = chat
     return chat
@@ -261,67 +263,38 @@ def scroll_to_top_on_phase_entry():
 # ============================================================================
 # LEAVE WARNING (refresh / back button)
 # ============================================================================
+
 def inject_leave_warning():
     if st.session_state.get("leave_warning_injected"):
         return
     st.session_state.leave_warning_injected = True
-
-    st.components.v1.html(
-        """
-        <script>
+    
+    st_javascript("""
         (function() {
-            // Risali fino alla finestra top (esce dall'iframe di Streamlit)
-            var win = window;
-            try { win = window.top; } catch(e) {}
-
-            if (win._leaveWarningAttached) return;
-            win._leaveWarningAttached = true;
-
-            var lastStreamlitActivity = Date.now();
-
-            // Patcha WebSocket sulla finestra top per tracciare i rerun
-            var OrigWS = win.WebSocket;
-            if (OrigWS) {
-                function PatchedWS(url, proto) {
-                    var ws = proto ? new OrigWS(url, proto) : new OrigWS(url);
-                    ws.addEventListener('message', function() {
-                        lastStreamlitActivity = Date.now();
-                    });
-                    ws.addEventListener('open', function() {
-                        lastStreamlitActivity = Date.now();
-                    });
-                    return ws;
-                }
-                PatchedWS.prototype      = OrigWS.prototype;
-                PatchedWS.CONNECTING     = OrigWS.CONNECTING;
-                PatchedWS.OPEN           = OrigWS.OPEN;
-                PatchedWS.CLOSING        = OrigWS.CLOSING;
-                PatchedWS.CLOSED         = OrigWS.CLOSED;
-                win.WebSocket = PatchedWS;
-            }
-
-            // Registra anche i WebSocket già aperti (Streamlit li apre all'avvio)
-            // tramite MutationObserver non serve — invece aggiorniamo lastActivity
-            // ogni volta che l'iframe invia un messaggio al parent
-            win.addEventListener('message', function(e) {
-                // Streamlit comunica tra iframe e parent via postMessage
-                lastStreamlitActivity = Date.now();
-            });
-
-            win.addEventListener('beforeunload', function(e) {
-                var elapsed = Date.now() - lastStreamlitActivity;
-                // Se c'è stata attività Streamlit nell'ultimo secondo → rerun, ignora
-                if (elapsed < 1000) return;
+            if (window._leaveWarningAttached) return;
+            window._leaveWarningAttached = true;
+            
+            var lastRerun = Date.now();
+            
+            // Traccia i messaggi WebSocket di Streamlit
+            var OrigWS = window.WebSocket;
+            window.WebSocket = function(url, proto) {
+                var ws = proto ? new OrigWS(url, proto) : new OrigWS(url);
+                ws.addEventListener('message', function() { lastRerun = Date.now(); });
+                ws.addEventListener('open',    function() { lastRerun = Date.now(); });
+                return ws;
+            };
+            window.WebSocket.prototype = OrigWS.prototype;
+            
+            window.addEventListener('beforeunload', function(e) {
+                if (Date.now() - lastRerun < 1000) return;
                 e.preventDefault();
                 e.returnValue = '';
                 return '';
             });
-
         })();
-        </script>
-        """,
-        height=0,
-    )
+        return true;
+    """)
 # ============================================================================
 # LIKERT-7 HELPERS
 # ============================================================================

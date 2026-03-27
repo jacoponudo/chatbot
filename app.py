@@ -615,7 +615,7 @@ scroll_to_top_on_phase_entry()
 # LEAVE WARNING — active for all phases between 1 and 13 inclusive
 # (not on consent/intro screens, not on termination, not after submission)
 # ============================================================================
-_active_phases = {0.25, 0.5, 0.75, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9.1, 9.2, 9.3, 10, 11, 12, 13, 14}
+_active_phases = { 0.5, 0.75, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9.1, 9.2, 9.3, 10, 11, 12, 13, 14}
 if st.session_state.phase in _active_phases:
     inject_leave_warning()
 

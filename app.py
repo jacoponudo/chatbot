@@ -261,40 +261,43 @@ def scroll_to_top_on_phase_entry():
 # ============================================================================
 # LEAVE WARNING (refresh / back button)
 # ============================================================================
-# pip install streamlit-javascript
-from streamlit_javascript import st_javascript
-
 def inject_leave_warning():
     if st.session_state.get("leave_warning_injected"):
         return
     st.session_state.leave_warning_injected = True
-    
-    st_javascript("""
+
+    # Inietta nel DOM principale, NON in un iframe
+    st.markdown(
+        """
+        <script>
         (function() {
             if (window._leaveWarningAttached) return;
             window._leaveWarningAttached = true;
-            
+
             var lastRerun = Date.now();
-            
-            // Traccia i messaggi WebSocket di Streamlit
-            var OrigWS = window.WebSocket;
-            window.WebSocket = function(url, proto) {
-                var ws = proto ? new OrigWS(url, proto) : new OrigWS(url);
+
+            // Intercetta i messaggi WebSocket di Streamlit
+            // per distinguere rerun interni da navigazione reale
+            var _origWS = window.WebSocket;
+            function PatchedWS(url, proto) {
+                var ws = proto ? new _origWS(url, proto) : new _origWS(url);
                 ws.addEventListener('message', function() { lastRerun = Date.now(); });
                 ws.addEventListener('open',    function() { lastRerun = Date.now(); });
                 return ws;
-            };
-            window.WebSocket.prototype = OrigWS.prototype;
-            
+            }
+            PatchedWS.prototype = _origWS.prototype;
+            window.WebSocket = PatchedWS;
+
             window.addEventListener('beforeunload', function(e) {
                 if (Date.now() - lastRerun < 1000) return;
                 e.preventDefault();
                 e.returnValue = '';
-                return '';
             });
         })();
-        return true;
-    """)
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 # ============================================================================
 # LIKERT-7 HELPERS
 # ============================================================================

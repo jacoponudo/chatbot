@@ -1,27 +1,47 @@
 import streamlit as st
-import json
-import random
+import gspread
+from google.oauth2.service_account import Credentials
 from datetime import datetime
+import json
+import os
+import time
+import random
+from collections import defaultdict
 
 import vertexai
-from vertexai.generative_models import GenerativeModel
-from google.oauth2.service_account import Credentials
+from vertexai.generative_models import GenerativeModel, ChatSession
+import threading
+
+from streamlit_autorefresh import st_autorefresh
 
 # ============================================================================
 # PAGE CONFIG
 # ============================================================================
 st.set_page_config(
-    page_title="Phase 9 Test",
-    page_icon="🧪",
+    page_title="Online Discussion Study",
+    page_icon="💬",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
 # ============================================================================
-# CONSTANTS
+# LOAD JSON FILES
+# ============================================================================
+def load_json(path):
+    if not os.path.exists(path):
+        st.error(f"Missing file: {path}")
+        st.stop()
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+PROMPTS = load_json("prompts.json")
+NORMS   = load_json("norms.json")
+
+# ============================================================================
+# WRITING TASK CONSTANTS
 # ============================================================================
 WRITING_FIXED_NORM = "not telling someone they have gained weight"
-WORD_MIN = 50
+WORD_MIN           = 50
 
 LIKERT_LABELS_RECOGN = [
     "Not at all", "Slightly", "Somewhat", "Moderately", "Very", "Mostly", "Completely",
@@ -30,110 +50,214 @@ LIKERT_LABELS_APPROP_WRITING = [
     "Extremely\ninappropriate", "Very\ninappropriate", "Somewhat\ninappropriate",
     "Neither", "Somewhat\nappropriate", "Very\nappropriate", "Extremely\nappropriate",
 ]
-# Phase 9 labels — text instead of numbers
-LIKERT_LABELS_DEFAULT = [
-    "Extremely\ninappropriate",
-    "Very\ninappropriate",
-    "Somewhat\ninappropriate",
-    "Neither",
-    "Somewhat\nappropriate",
-    "Very\nappropriate",
-    "Extremely\nappropriate",
-]
-
-INVOLVEMENT_ITEMS = [
-    ("They got me involved.",       "inv_0"),
-    ("They seemed relevant to me.", "inv_1"),
-    ("They interested me.",         "inv_2"),
-]
-THREAT_ITEMS = [
-    ("They tried to manipulate me.",            "thr_0"),
-    ("They tried to pressure me.",              "thr_1"),
-    ("They undermined my sense of self-worth.", "thr_2"),
-    ("They made me feel less than capable.",    "thr_3"),
-    ("They made me think I should change.",     "thr_4"),
-]
-SOURCE_ITEMS = [
-    ("Reliable",  "src_0"),
-    ("Trusted",   "src_1"),
-    ("Honest",    "src_2"),
-    ("Competent", "src_3"),
-    ("Expert",    "src_4"),
-    ("Informed",  "src_5"),
-]
 
 # ============================================================================
-# SESSION STATE DEFAULTS
+# GOOGLE SHEETS — lazy (main sheet)
 # ============================================================================
-if "session_initialized" not in st.session_state:
-    st.session_state.update({
-        "session_initialized":      True,
-        "phase":                    9,
-        "involvement_responses":    {},
-        "threat_responses":         {},
-        "source_responses":         {},
-        "writing_group":            random.choice(["A", "B"]),
-        "writing_text_final":       "",
-        "writing_keystroke_log":    {},   # {ISO timestamp: full text snapshot}
-        "writing_llm_output":       "",
-        "writing_llm_exchanges":    [],   # [{role, content, timestamp}]
-        "writing_post_recogn":      None,
-        "writing_post_appropriate": None,
-        "writing_pending_msg":      None,
-        "writing_chat_initialized": False,
-        "gemini_model":             None,
-        "writing_chat":             None,
-        # timing
-        "writing_phase_start":      None,
-        "writing_phase_end":        None,
-    })
+def get_sheet():
+    if "gsheet" not in st.session_state:
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive",
+            ],
+        )
+        st.session_state.gsheet = (
+            gspread.authorize(creds)
+            .open_by_url(st.secrets["google_sheet_url"])
+            .sheet1
+        )
+    return st.session_state.gsheet
 
 # ============================================================================
-# HELPERS — Likert scales
+# GOOGLE SHEETS — writing sheet (separate worksheet index 1)
 # ============================================================================
+def get_writing_sheet():
+    if "writing_gsheet" not in st.session_state:
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive",
+            ],
+        )
+        st.session_state.writing_gsheet = (
+            gspread.authorize(creds)
+            .open_by_url(st.secrets["google_sheet_url"])
+            .get_worksheet(1)
+        )
+    return st.session_state.writing_gsheet
+
+def save_to_writing_sheet(row):
+    get_writing_sheet().append_row(row, value_input_option="RAW")
+
+def check_prolific_id_exists(prolific_id):
+    values = get_sheet().col_values(1)
+    return prolific_id.lower() in [v.lower() for v in values[1:]]
+
+def get_least_used_combination():
+    sheet  = get_sheet()
+    data   = sheet.get_all_values()
+    counts = defaultdict(int)
+    for p in PROMPTS:
+        for n in NORMS:
+            counts[(p, n)] = 0
+    for row in data[1:]:
+        if len(row) >= 3 and (row[1], row[2]) in counts:
+            counts[(row[1], row[2])] += 1
+    min_count = min(counts.values())
+    return random.choice([k for k, v in counts.items() if v == min_count])
+
+def save_to_google_sheets(row):
+    get_sheet().append_row(row, value_input_option="RAW")
+
+# ============================================================================
+# VERTEX AI / GEMINI CLIENT — lazy
+# ============================================================================
+def get_gemini_model() -> GenerativeModel:
+    if "gemini_model" not in st.session_state:
+        vertex_creds = Credentials.from_service_account_info(
+            st.secrets["gcp_vertex_account"],
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        vertexai.init(
+            project=st.secrets["gcp_project_id"],
+            location=st.secrets.get("gcp_location", "europe-west9"),
+            credentials=vertex_creds,
+        )
+        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash-lite")
+    return st.session_state.gemini_model
+
+
+def preload_gemini_in_background():
+    def _init():
+        try:
+            get_gemini_model()
+        except Exception:
+            pass
+    if not st.session_state.get("gemini_preload_started"):
+        st.session_state.gemini_preload_started = True
+        threading.Thread(target=_init, daemon=True).start()
+
+
+def precompute_greeting_in_background():
+    def _generate():
+        try:
+            prompt_data   = PROMPTS[st.session_state.prompt_key]
+            norm_data     = NORMS[st.session_state.norm_key]
+            initial_val   = st.session_state.initial_opinion.get(norm_data["title"], 50)
+            system_prompt = (
+                prompt_data["system_prompt_template"]
+                .replace("{NORM_DESCRIPTION}", norm_data["title"])
+                .replace("{INITIAL_OPINION}", str(initial_val))
+            )
+            model = get_gemini_model()
+            chat  = model.start_chat()
+            response = chat.send_message(
+                f"{system_prompt}\n\nStart the discussion now. Open the topic."
+            )
+            st.session_state.precomputed_chat          = chat
+            st.session_state.precomputed_greeting      = response.text
+            st.session_state.precomputed_system_prompt = system_prompt
+        except Exception:
+            pass
+
+    if not st.session_state.get("greeting_precompute_started"):
+        st.session_state.greeting_precompute_started = True
+        threading.Thread(target=_generate, daemon=True).start()
+
+def get_or_rebuild_chat(system_prompt: str) -> ChatSession:
+    if "gemini_chat" in st.session_state:
+        return st.session_state.gemini_chat
+    model = get_gemini_model()
+    chat  = model.start_chat()
+    st.session_state.gemini_chat = chat
+    return chat
+
+# ============================================================================
+# SCROLL TO TOP
+# ============================================================================
+def scroll_to_top():
+    unique = int(time.time() * 1000)
+    st.components.v1.html(
+        f"""
+        <script id="scroll_{unique}">
+            (function() {{
+                function tryScroll() {{
+                    let main = window.parent.document.querySelector('.main');
+                    if (main) main.scrollTop = 0;
+                    let appView = window.parent.document.querySelector('[data-testid="stAppViewBlockContainer"]');
+                    if (appView) appView.scrollTop = 0;
+                    let stMain = window.parent.document.querySelector('[data-testid="stMain"]');
+                    if (stMain) stMain.scrollTop = 0;
+                    window.parent.scroll(0, 0);
+                }}
+                tryScroll();
+                setTimeout(tryScroll, 100);
+                setTimeout(tryScroll, 300);
+            }})();
+        </script>
+        """,
+        height=0,
+    )
+
+def scroll_to_top_on_phase_entry():
+    current_phase = st.session_state.phase
+    if st.session_state.get("last_scrolled_phase") != current_phase:
+        scroll_to_top()
+        st.session_state.last_scrolled_phase = current_phase
+
+# ============================================================================
+# LIKERT-7 HELPERS
+# ============================================================================
+LIKERT_LABELS = [
+    "Extremely inappropriate", "Very inappropriate", "Somewhat inappropriate",
+    "Neither", "Somewhat appropriate", "Very appropriate", "Extremely appropriate",
+]
+
 def likert_7(key, labels=None):
-    """7-point scale rendered as clickable text buttons."""
     if labels is None:
-        labels = LIKERT_LABELS_DEFAULT
+        labels = LIKERT_LABELS
     selected = st.session_state.get(key)
     cols = st.columns(7)
     for j, label in enumerate(labels):
         val = j + 1
         with cols[j]:
             btn_type = "primary" if selected == val else "secondary"
-            if st.button(label, key=f"{key}_btn_{val}", use_container_width=True, type=btn_type):
+            if st.button(label, key=f"{key}_btn_{val}",
+                         use_container_width=True, type=btn_type):
                 st.session_state[key] = val
                 st.rerun()
     st.markdown("<br>", unsafe_allow_html=True)
     return st.session_state.get(key)
 
+# Phase 9 perception scale — text labels, no numbers
 def render_7pt_item(label, key):
-    """Single Likert item with text labels (no numbers)."""
+    """Single Likert item with text labels (Totally disagree → Totally agree)."""
     st.markdown(f"**{label}**")
     cols     = st.columns(7)
     selected = st.session_state.get(key)
     scale_labels = [
         "Totally\ndisagree", "Mostly\ndisagree", "Somewhat\ndisagree",
-        "Neither", "Somewhat\nagree", "Mostly\nagree", "Totally\nagree"
+        "Neither", "Somewhat\nagree", "Mostly\nagree", "Totally\nagree",
     ]
     for j in range(1, 8):
         with cols[j - 1]:
-            lbl = scale_labels[j - 1]
-            if st.button(lbl, key=f"{key}_{j}", use_container_width=True,
+            if st.button(scale_labels[j - 1], key=f"{key}_{j}", use_container_width=True,
                          type="primary" if selected == j else "secondary"):
                 st.session_state[key] = j
                 st.rerun()
     st.markdown("")
 
 # ============================================================================
-# HELPERS — Autosave JS
+# AUTOSAVE JS HELPERS
 #
 # Every 1 s JS samples the textarea → writes {ISO_ts: text} into a hidden
 # input (autosave_json_sink).  A flip-flop hidden input (autosave_trigger)
 # forces a Streamlit rerun each second so Python can merge the log.
-# On each rerun, merge_autosave_into_log() accumulates new entries.
+# merge_autosave_into_log() accumulates new entries into writing_keystroke_log.
 # ============================================================================
-
 AUTOSAVE_SINK_LABEL    = "autosave_json_sink"
 AUTOSAVE_TRIGGER_LABEL = "autosave_trigger"
 
@@ -141,16 +265,12 @@ def inject_autosave_js():
     st.markdown(f"""
 <script>
 (function() {{
-    // Preserve the log across reruns — never reset it
     window._ksLog = window._ksLog || {{}};
-
-    // Clear any stacked interval from previous reruns
     if (window._autosaveIntervalId != null) {{
         clearInterval(window._autosaveIntervalId);
         window._autosaveIntervalId = null;
     }}
-
-    let lastText = null;
+    let lastText   = null;
     let triggerFlip = false;
 
     function nativeSet(el, val) {{
@@ -159,17 +279,14 @@ def inject_autosave_js():
         setter.call(el, val);
         el.dispatchEvent(new Event('input', {{ bubbles: true }}));
     }}
-
     function findInput(label) {{
         return document.querySelector('input[aria-label="' + label + '"]');
     }}
-
     function findTextarea() {{
         const tas = document.querySelectorAll('textarea');
         for (const ta of tas) {{ if (!ta.disabled) return ta; }}
         return null;
     }}
-
     function tick() {{
         const ta = findTextarea();
         if (ta) {{
@@ -182,14 +299,12 @@ def inject_autosave_js():
                 if (sink) nativeSet(sink, JSON.stringify(window._ksLog));
             }}
         }}
-        // Flip trigger to force Streamlit rerun
         const trigger = findInput('{AUTOSAVE_TRIGGER_LABEL}');
         if (trigger) {{
             triggerFlip = !triggerFlip;
             nativeSet(trigger, triggerFlip ? '1' : '0');
         }}
     }}
-
     tick();
     window._autosaveIntervalId = setInterval(tick, 1000);
 }})();
@@ -223,53 +338,532 @@ def merge_autosave_into_log():
             log[ts] = text
     st.session_state.writing_keystroke_log = log
 
-# ============================================================================
-# HELPERS — Gemini
-# ============================================================================
-def get_gemini_model() -> GenerativeModel:
-    if st.session_state.gemini_model is None:
-        vertex_creds = Credentials.from_service_account_info(
-            st.secrets["gcp_vertex_account"],
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-        vertexai.init(
-            project=st.secrets["gcp_project_id"],
-            location=st.secrets.get("gcp_location", "europe-west9"),
-            credentials=vertex_creds,
-        )
-        st.session_state.gemini_model = GenerativeModel("gemma-3-1b-it")
-    return st.session_state.gemini_model
+
+def _compute_duration_seconds() -> int:
+    """Compute writing phase duration in seconds from start/end ISO strings."""
+    try:
+        fmt = "%Y-%m-%dT%H:%M:%S.%fZ"
+        t0  = datetime.strptime(st.session_state.writing_phase_start, fmt)
+        t1  = datetime.strptime(st.session_state.writing_phase_end,   fmt)
+        return int((t1 - t0).total_seconds())
+    except Exception:
+        return -1
 
 # ============================================================================
-# PHASE 9 — Conversation Perception
+# PROLIFIC ID
 # ============================================================================
-if st.session_state.phase == 9:
-    st.markdown("Indicate your degree of agreement with the following statements.")
-    st.markdown("*Scale: Totally disagree → Totally agree*")
+prolific_id = st.query_params.get("PROLIFIC_PID", "")
+if not prolific_id:
+    st.error("Please access this study via Prolific to continue.")
+    st.stop()
+
+# ============================================================================
+# SESSION STATE DEFAULTS
+# ============================================================================
+if "session_initialized" not in st.session_state:
+    st.session_state.update({
+        "session_initialized":          True,
+        "prolific_id":                  prolific_id,
+        "phase":                        0,
+        "messages":                     [],
+        "greeting_sent":                False,
+        "data_saved":                   False,
+        "pending_user_message":         None,
+        "page_load_time":               time.time(),
+        "engagement_first_interaction": None,
+        "gemini_chat":                  None,
+        "system_prompt_cache":          None,
+        "last_scrolled_phase":          None,
+        # Writing task
+        "writing_group":                random.choice(["A", "B"]),
+        "writing_text_final":           "",      # plain text of final submission
+        "writing_keystroke_log":        {},      # {ISO_ts: text_snapshot} — autosave log
+        "writing_last_saved_text":      None,
+        "writing_llm_streaming":        False,
+        "writing_llm_output":           "",
+        "writing_llm_exchanges":        [],      # [{role, content, timestamp}]
+        "writing_post_recogn":          None,
+        "writing_post_appropriate":     None,
+        "writing_data_saved":           False,
+        "writing_pending_msg":          None,
+        "writing_chat_initialized":     False,
+        "writing_chat":                 None,
+        # Writing timing
+        "writing_phase_start":          None,    # ISO UTC — set at 9.1 → 9.2 transition
+        "writing_phase_end":            None,    # ISO UTC — set when Continue → clicked
+        # Involvement / threat / source (phase 9)
+        "involvement_responses":        {},
+        "threat_responses":             {},
+        "source_responses":             {},
+    })
+
+# ============================================================================
+# SCROLL TO TOP ON FIRST ENTRY INTO CURRENT PHASE
+# ============================================================================
+scroll_to_top_on_phase_entry()
+
+# ============================================================================
+# PHASE -1 — EARLY TERMINATION
+# ============================================================================
+if st.session_state.phase == -1:
+    st.markdown("## Thank you for your time.")
+    st.markdown(
+        "Unfortunately, your answer makes it impossible for us to include you in this study. "
+        "Thank you for your time. You may now close this window."
+    )
+    st.stop()
+
+# ============================================================================
+# PHASE 0 — CONSENT FORM
+# ============================================================================
+elif st.session_state.phase == 0:
+    preload_gemini_in_background()
+    st.markdown("## Thank you for joining our study!")
+    st.markdown("""
+**Before proceeding, please read carefully the information reported below.**
+
+**Aim of the Study**  
+You are being invited to participate in a study of social norms. The purpose of this study is to analyze everyday norms – i.e., norms about behavior that many people perform regularly, and most people could perform if they wanted to – and to understand how people engage in conversations about these topics with an advanced AI.
+
+**What will I be asked to do?**  
+If you agree to take part, you will be asked to answer a set of survey questions related to social norms. These include questions about how appropriate you and other people think behaviors are in different settings. Concerning questions about how other people perceive behaviors, you will receive a bonus payment if you make a correct guess. Next, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The study should take approximately 12 minutes to complete.
+
+**Can I change my mind?**  
+Participation is voluntary and you can decline to participate in the research or any aspects of the research at any time without penalty. You may withdraw by simply closing the browser on the computer. It will not be possible for you to withdraw after the completion of the survey because your responses are anonymous.
+
+**Risks and benefits**  
+There are no direct risk to you as a participant. Study results will help inform the scholarly understanding of AI conversations about everyday norms work. There is a risk that some of the questions may be sensitive and/or could cause you psychological distress. You don't have to answer any questions you don't want to. There are questions where you will receive a bonus payment of £0.50 if you answer correctly (two questions, for a maximum of £1).
+
+**Privacy and data**  
+The data that you provide will be anonymous so your responses cannot be linked back to you. The study data will be stored on an encrypted server at *(TBD)*. The anonymous dataset will be stored indefinitely and shared with other researchers for research and teaching purposes. We plan to publish the results of this study in academic journals and present them at conferences.
+
+**Any questions?**  
+If you have any questions about the research, please contact jacopo.nudo@uniroma1.it .
+
+By clicking "I agree" below you are indicating that you have read this information and agree to participate in this research study.
+""")
+
+    consent = st.radio(
+        "Your response:",
+        options=["I agree", "I do not agree"],
+        index=None,
+        key="consent_radio"
+    )
+
+    if consent == "I agree":
+        if st.button("Continue"):
+            try:
+                if check_prolific_id_exists(prolific_id):
+                    st.error("This Prolific ID has already completed the study.")
+                    st.stop()
+            except Exception as e:
+                st.error(f"Could not verify Prolific ID. Please try again or contact us. Error: {e}")
+                st.stop()
+            st.session_state.phase = 0.5
+            st.rerun()
+    elif consent == "I do not agree":
+        if st.button("Continue"):
+            st.session_state.phase = -1
+            st.rerun()
+
+# ============================================================================
+# PHASE 0.5 — DATA QUALITY CHECK
+# ============================================================================
+elif st.session_state.phase == 0.5:
+    st.markdown("We care about the quality of our survey data. For us to fully understand your opinions, it is important that you provide careful answers to each question in this survey.")
+    st.markdown("**Do you commit to thoughtfully provide your best answers to the questions in this survey?**")
+
+    quality = st.radio(
+        "Your answer:",
+        options=[
+            "I will try to provide my best answers",
+            "I will not provide my best answers",
+            "I can't promise either way",
+        ],
+        index=None,
+        key="quality_radio"
+    )
+
+    if quality == "I will try to provide my best answers":
+        if st.button("Continue"):
+            st.session_state.phase = 1
+            st.rerun()
+    elif quality in ("I will not provide my best answers", "I can't promise either way"):
+        if st.button("Continue"):
+            st.session_state.phase = -1
+            st.rerun()
+
+# ============================================================================
+# PHASE 1 — BACKGROUND QUESTION
+# ============================================================================
+elif st.session_state.phase == 1:
+    st.markdown("Please answer the question below in a few sentences. There is no right or wrong answer.")
+    st.markdown("**If you could change one thing about the world, what would it be and why? Please elaborate in a few sentences so we can better understand your perspective.**")
+
+    def _engagement_callback():
+        if st.session_state.engagement_first_interaction is None:
+            st.session_state.engagement_first_interaction = time.time()
+
+    st.text_area(
+        "Your answer:",
+        height=180,
+        key="engagement_text",
+        on_change=_engagement_callback,
+        label_visibility="collapsed"
+    )
+
+    if st.button("Continue"):
+        response = st.session_state.get("engagement_text", "").strip()
+        if not response:
+            st.warning("Please provide a response before continuing.")
+            st.stop()
+        now = time.time()
+        st.session_state.engagement_text_saved       = response
+        st.session_state.engagement_word_count       = len(response.split())
+        st.session_state.parallel_engagement_time    = now - st.session_state.page_load_time
+        st.session_state.sequential_engagement_time  = now - st.session_state.page_load_time
+        st.session_state.interaction_engagement_time = (
+            now - st.session_state.engagement_first_interaction
+            if st.session_state.engagement_first_interaction else None
+        )
+        st.session_state.phase = 2
+        st.rerun()
+
+# ============================================================================
+# PHASE 2 — INITIAL APPROPRIATENESS RATINGS
+# ============================================================================
+elif st.session_state.phase == 2:
+    if "prompt_key" not in st.session_state:
+        prompt_key, norm_key = get_least_used_combination()
+        st.session_state.prompt_key = prompt_key
+        st.session_state.norm_key   = norm_key
+        st.session_state.start_time = time.time()
+
+    if "sampled_norms" not in st.session_state:
+        norm_data   = NORMS[st.session_state.norm_key]
+        other_norms = [v for k, v in NORMS.items() if k != st.session_state.norm_key]
+        sampled     = random.sample(other_norms, min(4, len(other_norms))) + [norm_data]
+        random.shuffle(sampled)
+        st.session_state.sampled_norms = sampled
+
+    if "phase2_index" not in st.session_state:
+        st.session_state.phase2_index = 0
+    if "initial_opinion" not in st.session_state:
+        st.session_state.initial_opinion = {}
+
+    i     = st.session_state.phase2_index
+    norm  = st.session_state.sampled_norms[i]
+    total = len(st.session_state.sampled_norms)
+
+    st.markdown(f"*Question {i + 1} of {total}*")
+    st.markdown("""From various sources in our everyday lives we have all developed a subjective "impression" or "feeling" for the appropriateness of any given behavior in a particular situation. In this study, we are interested in your judgment of the appropriateness of some particular behaviors in some particular settings.
+
+Your task in each case is simply to rate, on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate), the appropriateness of the particular behavior in the situation that is given.""")
+
+    st.markdown(f"**How appropriate or inappropriate is the action of: '{norm['title']}'?**")
+    val = likert_7(key=f"likert_p2_{i}")
+
+    if st.button("Continue"):
+        if val is None:
+            st.warning("Please select a response before continuing.")
+            st.stop()
+        st.session_state.initial_opinion[norm['title']] = val
+        if i + 1 < total:
+            st.session_state.phase2_index += 1
+            st.rerun()
+        else:
+            st.session_state.phase = 3
+            st.rerun()
+
+# ============================================================================
+# PHASE 3 — EXPECTED OTHERS' RATINGS
+# ============================================================================
+elif st.session_state.phase == 3:
+    if "phase3_index" not in st.session_state:
+        st.session_state.phase3_index = 0
+    if "opinions_others" not in st.session_state:
+        st.session_state.opinions_others = {}
+
+    i     = st.session_state.phase3_index
+    norm  = st.session_state.sampled_norms[i]
+    total = len(st.session_state.sampled_norms)
+
+    st.markdown(f"*Question {i + 1} of {total}*")
+
+    if i == 0:
+        st.markdown("---")
+        st.markdown("## Now: What do others think?")
+        st.markdown("In this next section, we shift from asking about **your own opinion** to asking about **how you think other people responded**.")
+        st.markdown("---")
+
+    st.markdown("""We will now ask you what you think the other participants of this study from the UK have on average rated the appropriateness of these behaviors on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate).
+
+We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
+
+    st.markdown(f"**What rating do you think other UK participants gave for the action of: '{norm['title']}'?**")
+    st.markdown("Other respondents' average appropriateness rating:")
+    val = likert_7(key=f"likert_p3_{i}")
+
+    if st.button("Continue"):
+        if val is None:
+            st.warning("Please select a response before continuing.")
+            st.stop()
+        st.session_state.opinions_others[norm['title']] = val
+        if i + 1 < total:
+            st.session_state.phase3_index += 1
+            st.rerun()
+        else:
+            st.session_state.phase = 4
+            st.rerun()
+
+# ============================================================================
+# PHASE 4 — INSTRUCTIONS FOR CONVERSATION
+# ============================================================================
+elif st.session_state.phase == 4:
+    st.markdown("""Now, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The purpose of this dialogue is to see how humans and AI interact. Please be open and honest in your responses. Remember that the AI is neutral and non-judgmental, and your participation is confidential. When the conversation begins, you should see an orange robot icon indicating it's generating responses. It can sometimes take up to 30s. If you don't see any icons or if it's taking too long to generate responses, try refreshing the page. If you run into further issues, please let us know.
+
+Please read each AI message thoroughly, and you may have to scroll down to read its full message. You will be asked some questions about your interaction. You will have to write at least 2 messages to the AI, up to a maximum of 10.
+
+When the conversation is over, you should see a message at the bottom: **Scroll down and proceed to the next section.**""")
+
+    precompute_greeting_in_background()
+
+    if st.button("Start Conversation"):
+        st.session_state.phase = 5
+        st.rerun()
+
+# ============================================================================
+# PHASE 5 — CONVERSATION WITH GEMINI
+# ============================================================================
+elif st.session_state.phase == 5:
+    prompt_data   = PROMPTS[st.session_state.prompt_key]
+    norm_data     = NORMS[st.session_state.norm_key]
+    initial_val   = st.session_state.initial_opinion.get(norm_data["title"], 50)
+    system_prompt = (
+        prompt_data["system_prompt_template"]
+        .replace("{NORM_DESCRIPTION}", norm_data["title"])
+        .replace("{INITIAL_OPINION}", str(initial_val))
+    )
+    st.session_state.system_prompt_cache = system_prompt
+
+    if not st.session_state.greeting_sent:
+        if st.session_state.get("precomputed_greeting"):
+            st.session_state.gemini_chat = st.session_state.precomputed_chat
+            greeting_text = st.session_state.precomputed_greeting
+        else:
+            with st.spinner("Starting conversation..."):
+                model = get_gemini_model()
+                chat  = model.start_chat()
+                response = chat.send_message(
+                    f"{system_prompt}\n\nStart the discussion now. Present the norm you would like to discuss about."
+                )
+                st.session_state.gemini_chat = chat
+                greeting_text = response.text
+
+        st.session_state.messages.append({
+            "role":      "assistant",
+            "content":   greeting_text,
+            "timestamp": datetime.now().isoformat(),
+        })
+        st.session_state.greeting_sent = True
+        st.rerun()
+
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+    assistant_count = sum(1 for m in st.session_state.messages if m["role"] == "assistant")
+    round_count     = max(0, assistant_count - 1)
+
+    if user_input := st.chat_input("Type your response here"):
+        st.session_state.pending_user_message = {
+            "role":      "user",
+            "content":   user_input,
+            "timestamp": datetime.now().isoformat(),
+        }
+        st.rerun()
+
+    if st.session_state.pending_user_message:
+        user_msg = st.session_state.pending_user_message
+        st.session_state.messages.append(user_msg)
+        with st.chat_message("user"):
+            st.markdown(user_msg["content"])
+        st.session_state.pending_user_message = None
+
+        if round_count < 10:
+            chat = st.session_state.get("gemini_chat")
+            if chat is None:
+                model = get_gemini_model()
+                chat  = model.start_chat()
+                chat.send_message(
+                    f"{system_prompt}\n\n"
+                    "Continue the ongoing discussion. "
+                    "Below is the conversation so far (for context only):\n\n"
+                    + "\n".join(
+                        f"{'User' if m['role']=='user' else 'You'}: {m['content']}"
+                        for m in st.session_state.messages[:-1]
+                    )
+                )
+                st.session_state.gemini_chat = chat
+
+            with st.chat_message("assistant"):
+                stream     = chat.send_message(user_msg["content"], stream=True)
+                reply_text = st.write_stream(chunk.text for chunk in stream)
+
+            st.session_state.messages.append({
+                "role":      "assistant",
+                "content":   reply_text,
+                "timestamp": datetime.now().isoformat(),
+            })
+        else:
+            closing = (
+                "Thank you for your thoughtful responses! "
+                "The discussion is now complete. "
+                "Please scroll down and proceed to the next section."
+            )
+            st.session_state.messages.append({
+                "role":      "assistant",
+                "content":   closing,
+                "timestamp": datetime.now().isoformat(),
+            })
+        st.rerun()
+
+    user_msg_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
+    if st.button("End Discussion & Continue"):
+        if user_msg_count >= 2:
+            st.session_state.phase = 6
+            st.rerun()
+
+# ============================================================================
+# PHASE 6 — ATTENTION CHECK
+# ============================================================================
+elif st.session_state.phase == 6:
+    st.markdown("**Which of the following best describes the main topic discussed with the AI?**")
+    options = [n["title"] for n in st.session_state.sampled_norms] + ["None of the above / I don't remember"]
+    st.radio("Select one:", options, index=None, key="att_check_response", label_visibility="collapsed")
+    if st.button("Continue"):
+        if not st.session_state.get("att_check_response"):
+            st.warning("Please select an answer before continuing.")
+            st.stop()
+        st.session_state.att_check_response_saved = st.session_state.att_check_response
+        st.session_state.phase = 7
+        st.rerun()
+
+# ============================================================================
+# PHASE 7 — FINAL APPROPRIATENESS RATINGS
+# ============================================================================
+elif st.session_state.phase == 7:
+    if "phase7_index" not in st.session_state:
+        st.session_state.phase7_index = 0
+    if "final_opinion" not in st.session_state:
+        st.session_state.final_opinion = {}
+
+    i     = st.session_state.phase7_index
+    norm  = st.session_state.sampled_norms[i]
+    total = len(st.session_state.sampled_norms)
+    title = norm["title"]
+
+    st.markdown(f"*Question {i + 1} of {total}*")
+    st.markdown("We ask you again to rate, on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate), the appropriateness of these behaviors.")
+    st.markdown(f"**How appropriate or inappropriate is the action of: '{title}'?**")
+    val = likert_7(key=f"likert_p7_{i}")
+
+    if st.button("Continue"):
+        if val is None:
+            st.warning("Please select a response before continuing.")
+            st.stop()
+        st.session_state.final_opinion[title] = val
+        if i + 1 < total:
+            st.session_state.phase7_index += 1
+            st.rerun()
+        else:
+            st.session_state.phase = 8
+            st.rerun()
+
+# ============================================================================
+# PHASE 8 — FINAL EXPECTED OTHERS' RATINGS
+# ============================================================================
+elif st.session_state.phase == 8:
+    if "opinions_others_final" not in st.session_state:
+        st.session_state.opinions_others_final = {}
+
+    norm_data = NORMS[st.session_state.norm_key]
+    title     = norm_data["title"]
+
+    st.markdown("---")
+    st.markdown("## Now: What do others think?")
+    st.markdown("In this next section, we shift again from asking about **your own opinion** to asking about **how you think other people responded**.")
+    st.markdown("---")
+
+    st.markdown(f"""We will now ask you what you think the other participants of this study from the UK have on average rated the appropriateness of one specific behavior on a 7-point scale from 1 (completely inappropriate) to 7 (completely appropriate).
+
+Just like you, the other participants also had a conversation with an AI about this topic before being asked this question again. Please imagine that their opinion may have been influenced by that interaction as well.
+
+We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50.""")
+
+    st.markdown(f"**What rating do you think other UK participants gave (after their AI conversation) for the action of: '{title}'?**")
+    st.markdown("Other respondents' average appropriateness rating:")
+    val = likert_7(key="likert_p8_0")
+
+    if st.button("Continue"):
+        if val is None:
+            st.warning("Please select a response before continuing.")
+            st.stop()
+        st.session_state.opinions_others_final[title] = val
+        st.session_state.phase = 9
+        st.rerun()
+
+# ============================================================================
+# PHASE 9 — CONVERSATION PERCEPTION
+# Text labels on every item (no numbers)
+# ============================================================================
+elif st.session_state.phase == 9:
+    involvement_items = [
+        ("They got me involved.",       "involvement_0"),
+        ("They seemed relevant to me.", "involvement_1"),
+        ("They interested me.",         "involvement_2"),
+    ]
+    threat_items = [
+        ("They tried to manipulate me.",            "threat_0"),
+        ("They tried to pressure me.",              "threat_1"),
+        ("They undermined my sense of self-worth.", "threat_2"),
+        ("They made me feel less than capable.",    "threat_3"),
+        ("They made me think I should change.",     "threat_4"),
+    ]
+    source_items = [
+        ("Reliable",  "source_0"),
+        ("Trusted",   "source_1"),
+        ("Honest",    "source_2"),
+        ("Competent", "source_3"),
+        ("Expert",    "source_4"),
+        ("Informed",  "source_5"),
+    ]
 
     def _render_group(items, header):
         st.markdown(f"#### {header}")
         for label, key in items:
             render_7pt_item(label, key)
 
-    _render_group(INVOLVEMENT_ITEMS, "Involvement — The messages I read during the conversation with the AI:")
-    _render_group(THREAT_ITEMS,      "Perceived Threat — The messages I read during the conversation with the AI:")
-    _render_group(SOURCE_ITEMS,      "Evaluation of the Source — To what extent the source of these messages is:")
+    st.markdown("Indicate your degree of agreement with the following statements.")
+    st.markdown("*Scale: Totally disagree → Totally agree*")
+    _render_group(involvement_items, "Involvement — The messages I read during the conversation with the AI:")
+    _render_group(threat_items,      "Perceived Threat — The messages I read during the conversation with the AI:")
+    _render_group(source_items,      "Evaluation of the Source — To what extent the source of these messages is:")
 
     if st.button("Continue"):
-        all_keys = [k for _, k in INVOLVEMENT_ITEMS + THREAT_ITEMS + SOURCE_ITEMS]
+        all_keys = [k for _, k in involvement_items + threat_items + source_items]
         missing  = [k for k in all_keys if not st.session_state.get(k)]
         if missing:
             st.warning("Please respond to all statements before continuing.")
             st.stop()
-        st.session_state.involvement_responses = {l: st.session_state[k] for l, k in INVOLVEMENT_ITEMS}
-        st.session_state.threat_responses      = {l: st.session_state[k] for l, k in THREAT_ITEMS}
-        st.session_state.source_responses      = {l: st.session_state[k] for l, k in SOURCE_ITEMS}
+        st.session_state.involvement_responses = {l: st.session_state[k] for l, k in involvement_items}
+        st.session_state.threat_responses      = {l: st.session_state[k] for l, k in threat_items}
+        st.session_state.source_responses      = {l: st.session_state[k] for l, k in source_items}
         st.session_state.phase = 9.1
         st.rerun()
 
 # ============================================================================
-# PHASE 9.1 — Writing Task Instructions
+# PHASE 9.1 — WRITING TASK: INSTRUCTIONS
 # ============================================================================
 elif st.session_state.phase == 9.1:
     st.markdown("## Writing Task — Instructions")
@@ -288,26 +882,32 @@ elif st.session_state.phase == 9.1:
         unsafe_allow_html=True,
     )
     st.markdown("---")
-    st.markdown(f"*(Debug: assigned to Group **{st.session_state.writing_group}**)*")
 
     if st.button("Start writing →"):
-        # Record phase start time
+        # Record exact moment the user enters the writing screen
         st.session_state.writing_phase_start = datetime.utcnow().isoformat() + "Z"
         st.session_state.phase = 9.2
         st.rerun()
 
 # ============================================================================
-# PHASE 9.2 — Writing Task Screen
+# PHASE 9.2 — WRITING TASK: WRITING SCREEN
+#
+# Key improvements vs original:
+#   • 1-second JS autosave → writing_keystroke_log accumulates across reruns
+#   • Live word counter + progress bar for both Group A and B
+#   • Continue button disabled until WORD_MIN words reached
+#   • LLM chat messages carry timestamps (stored, not displayed)
+#   • writing_llm_streaming pauses autorefresh during streaming
 # ============================================================================
 elif st.session_state.phase == 9.2:
 
-    # Merge any new autosave data on every rerun (includes 1-s triggered reruns)
+    # Merge any JS autosave data on every rerun (including 1-s triggered reruns)
     merge_autosave_into_log()
 
     group = st.session_state.writing_group
 
-    def _writing_ui(textarea_key: str, height: int, show_word_counter: bool = False):
-        """Norm box + textarea + autosave + optional word counter + continue button."""
+    # ── Shared writing UI (used by both groups) ──────────────────────────────
+    def _writing_ui(textarea_key: str, height: int):
         st.markdown(
             "**Please write around 5 lines expressing your personal perception of the following norm:**"
         )
@@ -317,7 +917,6 @@ elif st.session_state.phase == 9.2:
             f"\"{WRITING_FIXED_NORM}\"</div>",
             unsafe_allow_html=True,
         )
-
         st.text_area(
             "Your answer:",
             height=height,
@@ -329,74 +928,49 @@ elif st.session_state.phase == 9.2:
         render_autosave_inputs()
         inject_autosave_js()
 
-        # ── Word counter + conditional Continue (Group B) ────────────────────
-        current_text  = st.session_state.get(textarea_key, "") or ""
-        word_count    = len(current_text.split()) if current_text.strip() else 0
-        enough_words  = word_count >= WORD_MIN
+        current_text = st.session_state.get(textarea_key, "") or ""
+        word_count   = len(current_text.split()) if current_text.strip() else 0
+        enough_words = word_count >= WORD_MIN
 
-        if show_word_counter:
-            # Progress bar and word count
-            progress = min(word_count / WORD_MIN, 1.0)
-            st.progress(progress)
-
-            if enough_words:
-                st.success(f"✅ **{word_count} words** — minimum reached! You can continue.")
-            else:
-                remaining = WORD_MIN - word_count
-                st.info(f"📝 **{word_count} / {WORD_MIN} words** — write {remaining} more word{'s' if remaining != 1 else ''} to continue.")
-
-            # Show live autosave snapshot count
-            n_snap = len(st.session_state.writing_keystroke_log)
-            if n_snap > 0:
-                st.caption(f"💾 {n_snap} snapshot{'s' if n_snap != 1 else ''} autosaved")
-
-            if enough_words:
-                if st.button("Continue →", key=f"btn_{textarea_key}"):
-                    _save_and_advance(textarea_key, current_text)
-            else:
-                st.button("Continue →", key=f"btn_{textarea_key}", disabled=True)
-
+        # Progress bar + banner
+        st.progress(min(word_count / WORD_MIN, 1.0))
+        if enough_words:
+            st.success(f"✅ **{word_count} words** — minimum reached! You can continue.")
         else:
-            # Group A — original behaviour
-            n_snap = len(st.session_state.writing_keystroke_log)
-            if n_snap > 0:
-                st.caption(f"💾 {n_snap} snapshot{'s' if n_snap != 1 else ''} autosaved")
+            remaining = WORD_MIN - word_count
+            st.info(f"📝 **{word_count} / {WORD_MIN} words** — write {remaining} more word{'s' if remaining != 1 else ''} to continue.")
 
+        # Continue button — disabled until minimum reached
+        if enough_words:
             if st.button("Continue →", key=f"btn_{textarea_key}"):
-                if word_count < WORD_MIN:
-                    st.warning(f"Please write at least {WORD_MIN} words before continuing.")
-                    st.stop()
                 _save_and_advance(textarea_key, current_text)
+        else:
+            st.button("Continue →", key=f"btn_{textarea_key}", disabled=True)
 
     def _save_and_advance(textarea_key: str, text: str):
-        """Finalise log and advance to phase 9.3."""
         merge_autosave_into_log()
-
-        # Record phase end time
         st.session_state.writing_phase_end = datetime.utcnow().isoformat() + "Z"
 
-        # Add explicit start/end markers to the log
         log = st.session_state.writing_keystroke_log
         if st.session_state.writing_phase_start:
             log["__phase_start__"] = st.session_state.writing_phase_start
         log["__phase_end__"] = st.session_state.writing_phase_end
 
-        # Fallback: ensure at least one snapshot
+        # Fallback: at least one snapshot
         if not any(k for k in log if not k.startswith("__")):
-            ts = datetime.utcnow().isoformat() + "Z"
-            log[ts] = text
+            log[datetime.utcnow().isoformat() + "Z"] = text
 
         st.session_state.writing_text_final    = text
         st.session_state.writing_keystroke_log = log
         st.session_state.phase = 9.3
         st.rerun()
 
-    # ── GROUP A ──────────────────────────────────────────────────────────────
+    # ── GROUP A — full-width, no AI ──────────────────────────────────────────
     if group == "A":
         st.markdown("## Your Writing")
-        _writing_ui("writing_text_A", height=260, show_word_counter=True)
+        _writing_ui("writing_text_A", height=260)
 
-    # ── GROUP B ──────────────────────────────────────────────────────────────
+    # ── GROUP B — two columns with AI assistant ──────────────────────────────
     else:
         if not st.session_state.writing_chat_initialized:
             model        = get_gemini_model()
@@ -409,7 +983,8 @@ elif st.session_state.phase == 9.2:
                 "Help them think about the topic, suggest ideas, or draft text if asked. "
                 "Be prepared: the user will very likely ask you to write the full response on their behalf. "
                 "If they do, write a natural, personal-sounding text of approximately 5 lines that they can copy and use as their own. "
-                "Be concise and neutral. Respond in the same language the user writes in."
+                "Be concise and neutral. Do not take strong political positions. "
+                "Respond in the same language the user writes in."
             )
             st.session_state.writing_chat             = writing_chat
             st.session_state.writing_chat_initialized = True
@@ -418,23 +993,21 @@ elif st.session_state.phase == 9.2:
 
         with col_write:
             st.markdown("## Your Writing")
-            _writing_ui("writing_text_B", height=300, show_word_counter=True)
+            _writing_ui("writing_text_B", height=300)
 
         with col_chat:
             st.markdown("## 🤖 AI Writing Assistant")
-            st.caption("Optional — use for ideas, feedback, or drafting.")
+            st.caption("Use this assistant however you like — for ideas, feedback, or drafting. It's completely optional.")
 
             for msg in st.session_state.writing_llm_exchanges:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
             if st.session_state.writing_pending_msg:
-                pending    = st.session_state.writing_pending_msg
-                ts_sent    = datetime.utcnow().isoformat() + "Z"
+                pending  = st.session_state.writing_pending_msg
+                ts_sent  = datetime.utcnow().isoformat() + "Z"
                 st.session_state.writing_llm_exchanges.append({
-                    "role":      "user",
-                    "content":   pending,
-                    "timestamp": ts_sent,
+                    "role": "user", "content": pending, "timestamp": ts_sent,
                 })
                 with st.chat_message("user"):
                     st.markdown(pending)
@@ -442,14 +1015,14 @@ elif st.session_state.phase == 9.2:
 
                 chat = st.session_state.writing_chat
                 with st.chat_message("assistant"):
-                    stream     = chat.send_message(pending, stream=True)
-                    reply      = st.write_stream(chunk.text for chunk in stream)
-                    ts_reply   = datetime.utcnow().isoformat() + "Z"
+                    st.session_state.writing_llm_streaming = True
+                    stream   = chat.send_message(pending, stream=True)
+                    reply    = st.write_stream(chunk.text for chunk in stream)
+                    ts_reply = datetime.utcnow().isoformat() + "Z"
+                    st.session_state.writing_llm_streaming = False
 
                 st.session_state.writing_llm_exchanges.append({
-                    "role":      "assistant",
-                    "content":   reply,
-                    "timestamp": ts_reply,
+                    "role": "assistant", "content": reply, "timestamp": ts_reply,
                 })
                 st.session_state.writing_llm_output = reply
                 st.rerun()
@@ -460,7 +1033,7 @@ elif st.session_state.phase == 9.2:
                 st.rerun()
 
 # ============================================================================
-# PHASE 9.3 — Post-Writing Questionnaire
+# PHASE 9.3 — WRITING TASK: POST-WRITING QUESTIONNAIRE + SAVE TO WRITING SHEET
 # ============================================================================
 elif st.session_state.phase == 9.3:
     st.markdown("## A few questions about what you just wrote")
@@ -486,127 +1059,316 @@ elif st.session_state.phase == 9.3:
         if recogn is None or appropriate is None:
             st.warning("Please answer both questions before continuing.")
             st.stop()
+
         st.session_state.writing_post_recogn      = recogn
         st.session_state.writing_post_appropriate = appropriate
-        st.session_state.phase = 99
+
+        # ── Save to writing Google Sheet ─────────────────────────────────────
+        # Columns:
+        #   prolific_id | writing_group | norm |
+        #   writing_text_final (plain text) |
+        #   writing_keystroke_log (JSON: {ISO_ts: snapshot, __phase_start__, __phase_end__}) |
+        #   writing_phase_start | writing_phase_end | writing_duration_seconds |
+        #   writing_llm_output | writing_llm_exchanges (JSON) | n_llm_turns |
+        #   post_recogn | post_appropriate | timestamp
+        if not st.session_state.writing_data_saved:
+            dur_s = _compute_duration_seconds()
+            writing_row = [
+                st.session_state.prolific_id,
+                st.session_state.get("writing_group", ""),
+                WRITING_FIXED_NORM,
+                st.session_state.get("writing_text_final", ""),
+                json.dumps(
+                    st.session_state.get("writing_keystroke_log", {}),
+                    ensure_ascii=False,
+                ),
+                str(st.session_state.get("writing_phase_start", "")),
+                str(st.session_state.get("writing_phase_end",   "")),
+                str(dur_s),
+                st.session_state.get("writing_llm_output", ""),
+                json.dumps(
+                    st.session_state.get("writing_llm_exchanges", []),
+                    ensure_ascii=False,
+                ),
+                str(len(st.session_state.get("writing_llm_exchanges", [])) // 2),
+                str(st.session_state.get("writing_post_recogn",      "")),
+                str(st.session_state.get("writing_post_appropriate",  "")),
+                datetime.now().isoformat(),
+            ]
+            try:
+                save_to_writing_sheet(writing_row)
+                st.session_state.writing_data_saved = True
+            except Exception as e:
+                st.error(
+                    f"There was an error saving your writing data: {e}. "
+                    "Please contact the researchers before closing this page."
+                )
+                st.stop()
+
+        st.session_state.phase = 10
         st.rerun()
 
 # ============================================================================
-# PHASE 99 — DATA SUMMARY
+# PHASE 10 — TIGHTNESS SCALE
 # ============================================================================
-elif st.session_state.phase == 99:
-    st.markdown("# 📋 Collected Data — Debug Summary")
-    st.markdown("This page shows all the data that would be saved to Google Sheets in the real study.")
+elif st.session_state.phase == 10:
+    st.markdown("""The following statements refer to the country in which you currently live, as a whole. Indicate whether you agree or disagree with the statements using the following scale. Note that the statements sometimes refer to "social norms," which are generally unwritten standards of behavior.""")
+
+    tightness_items = [
+        "In this country, there are many social norms that people should abide by.",
+        "In this country, there are very clear expectations for how people should behave in most situations.",
+        "In this country, people agree on which behaviors are appropriate and which are inappropriate in most situations.",
+        "In this country, people have a great deal of freedom in deciding how they want to behave in most situations.",
+        "In this country, if someone behaves inappropriately, others will strongly disapprove.",
+        "In this country, people almost always comply with social norms.",
+        "In this country, people have very little freedom in deciding how they want to behave in most situations.",
+    ]
+    scale_labels = ["Strongly disagree", "Moderately disagree", "Slightly disagree",
+                    "Slightly agree", "Moderately agree", "Strongly agree"]
+
+    for i, item in enumerate(tightness_items):
+        st.markdown(f"**{item}**")
+        cols     = st.columns(6)
+        selected = st.session_state.get(f"tight_{i}")
+        for j, label in enumerate(scale_labels):
+            val = j + 1
+            with cols[j]:
+                if st.button(label, key=f"tight_{i}_{val}", use_container_width=True,
+                             type="primary" if selected == val else "secondary"):
+                    st.session_state[f"tight_{i}"] = val
+                    st.rerun()
+        st.markdown("")
+
+    st.markdown("---")
+    st.text_area(
+        "Is there anything you would like to add or do you want to clarify about your answers?",
+        height=100, key="tightness_open"
+    )
+
+    if st.button("Continue"):
+        missing = [i for i in range(len(tightness_items)) if not st.session_state.get(f"tight_{i}")]
+        if missing:
+            st.warning("Please respond to all statements before continuing.")
+            st.stop()
+        st.session_state.tightness_responses = {
+            item: st.session_state[f"tight_{i}"]
+            for i, item in enumerate(tightness_items)
+        }
+        st.session_state.phase = 11
+        st.rerun()
+
+# ============================================================================
+# PHASE 11 — PURPOSE OF STUDY
+# ============================================================================
+elif st.session_state.phase == 11:
+    st.markdown("**What do you think is the purpose of this study?**")
+    st.text_area("Your answer:", height=150, key="purpose_text", label_visibility="collapsed")
+
+    if st.button("Continue"):
+        response = st.session_state.get("purpose_text", "").strip()
+        if not response:
+            st.warning("Please write your answer before continuing.")
+            st.stop()
+        st.session_state.purpose_text_saved = response
+        st.session_state.phase = 12
+        st.rerun()
+
+# ============================================================================
+# PHASE 12 — DEMOGRAPHIC QUESTIONS
+# ============================================================================
+elif st.session_state.phase == 12:
+    st.markdown("Please answer the following questions about yourself.")
     st.markdown("---")
 
-    st.markdown("## Phase 9 — Conversation Perception")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**Involvement**")
-        for label, val in st.session_state.involvement_responses.items():
-            st.write(f"- {label}: **{val}**")
-    with col2:
-        st.markdown("**Perceived Threat**")
-        for label, val in st.session_state.threat_responses.items():
-            st.write(f"- {label}: **{val}**")
-    with col3:
-        st.markdown("**Source Evaluation**")
-        for label, val in st.session_state.source_responses.items():
-            st.write(f"- {label}: **{val}**")
+    age = st.selectbox(
+        "How old are you, in years?",
+        list(range(18, 101)),
+        index=None,
+        placeholder="Select your age...",
+        key="demo_age"
+    )
+    uk_location = st.selectbox(
+        "Where do you live (in the UK)?",
+        ["England", "Wales", "Scotland", "Northern Ireland"],
+        index=None,
+        placeholder="Select your location...",
+        key="demo_location"
+    )
+    st.markdown("**What is your gender?**")
+    gender = st.radio("Gender:", ["Male", "Female", "Other"],
+                      horizontal=True, key="demo_gender", label_visibility="collapsed")
+    st.markdown("**Are you currently enrolled as a student?**")
+    student = st.radio("Student:", ["Yes", "No"],
+                       horizontal=True, key="demo_student", label_visibility="collapsed")
+    education = st.selectbox(
+        "What is the highest level of education you have completed, or the highest degree you have received?",
+        [
+            "Less than high school degree (less than 12 years in school)",
+            "High school graduate (12 or more years in school)",
+            "Some college but no degree",
+            "Bachelor's/Associate degree",
+            "Master's degree",
+            "Doctoral degree",
+        ],
+        index=None,
+        placeholder="Select your education level...",
+        key="demo_education"
+    )
+    st.markdown("**Here is a 7-point scale on which the political views that people might hold are arranged from extremely liberal (left) to extremely conservative (right). Where would you place yourself on this scale?**")
+    col_l, col_m, col_r = st.columns([2, 5, 2])
+    with col_l:
+        st.markdown("<div style='text-align:right;padding-top:28px'>Extremely liberal (left)</div>",
+                    unsafe_allow_html=True)
+    with col_m:
+        politics = st.slider("Politics", 1, 7, 4, key="demo_politics", label_visibility="collapsed")
+    with col_r:
+        st.markdown("<div style='padding-top:28px'>Extremely conservative (right)</div>",
+                    unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("## Phase 9.2 — Writing Task")
-    st.write(f"**Norm:** {WRITING_FIXED_NORM}")
-    st.write(f"**Group:** {st.session_state.writing_group}")
+    st.markdown("<br><br>", unsafe_allow_html=True)
 
-    # Timing
-    col_t1, col_t2 = st.columns(2)
-    with col_t1:
-        st.write(f"⏱ **Phase start:** {st.session_state.writing_phase_start or '—'}")
-    with col_t2:
-        st.write(f"⏱ **Phase end:** {st.session_state.writing_phase_end or '—'}")
+    st.markdown("""**Think of a ladder as representing where people stand in the UK. At the top of the ladder are the people who are the best off – those who have the most money, the most education, and the most respected jobs. At the bottom are the people who are the worst off – those who have the least money, least education, the least respected jobs, or no job. Where would you place yourself on this ladder?**""")
+    col_l2, col_m2, col_r2 = st.columns([2, 5, 2])
+    with col_l2:
+        st.markdown("<div style='text-align:right;padding-top:28px'>Bottom (1)</div>",
+                    unsafe_allow_html=True)
+    with col_m2:
+        ladder = st.select_slider(
+            "Social ladder position (1 = bottom, 10 = top):",
+            options=list(range(1, 11)), value=5, key="demo_ladder",
+            label_visibility="collapsed"
+        )
+    with col_r2:
+        st.markdown("<div style='padding-top:28px'>Top (10)</div>",
+                    unsafe_allow_html=True)
 
-    # Duration
-    if st.session_state.writing_phase_start and st.session_state.writing_phase_end:
+    if st.button("Continue"):
+        errors = []
+        if age         is None: errors.append("Please select your age.")
+        if uk_location is None: errors.append("Please select where you live in the UK.")
+        if education   is None: errors.append("Please select your education level.")
+        if errors:
+            for e in errors: st.warning(e)
+            st.stop()
+        st.session_state.demographics = {
+            "age": age, "uk_location": uk_location, "gender": gender,
+            "student": student, "education": education,
+            "politics": politics, "social_ladder": ladder,
+        }
+        st.session_state.phase = 13
+        st.rerun()
+
+# ============================================================================
+# PHASE 13 — DEBRIEFING
+# ============================================================================
+elif st.session_state.phase == 13:
+    st.markdown("## Debriefing")
+    st.markdown("""Our study focuses on a type of artificial intelligence (AI) called a "large language model" or LLM. An LLM is a type of AI that can engage you in a conversation. We set out to measure whether LLMs could persuade people to change their judgments about the appropriateness of everyday social behaviors. This is because we are interested in seeing if it is possible to use LLMs as tools for social persuasion, that is, to influence how people think about what is or is not appropriate behavior.
+
+When you interact with an LLM, you provide it with a "query" (an excerpt of text) and it generates a response. This response is based on the knowledge it has learned during its training. An LLM is still a machine learning system, and its knowledge is limited by the data it was trained on. It might not always provide the most accurate or up-to-date information, and it can sometimes generate responses that don't make perfect sense. However, as AI technology advances, these models continue to improve in their understanding and generation of human language.
+
+Recent research has shown that LLMs have developed the ability to generate persuasive messages. This has raised concerns about their potential to influence how people perceive and evaluate social norms. We displayed these messages to you and other participants to observe how you may react to them. We were particularly interested in whether, after interacting with an LLM, you might report a different view on the appropriateness of everyday behaviors.
+
+If you felt that your views were changed or influenced by the conversation, we encourage you to reflect on how and why this happened. It is important to understand that the model was designed to present arguments in a persuasive manner, and your responses contribute to our understanding of how AI can be used to impact judgments about social norms.
+
+To reiterate, in this experiment, the messages that you were exposed to were written by AI (in the form of an LLM).
+
+We hope that our research can contribute to a better understanding of how to make these models safer and reduce the risk of their misuse. We appreciate the time you spent participating in this experiment. You can learn more about LLMs by clicking *(TBD)*. If you have any further questions, please reach out to the researchers at *(TBD)*. As a reminder, you have the right to withdraw your responses by contacting the researcher with your Prolific ID through e-mail or through Prolific's anonymous messaging system.""")
+
+    if st.button("Continue"):
+        st.session_state.phase = 14
+        st.rerun()
+
+# ============================================================================
+# PHASE 14 — FINAL COMMENTS + SAVE TO MAIN GOOGLE SHEET
+# ============================================================================
+elif st.session_state.phase == 14 and not st.session_state.data_saved:
+    st.markdown("You may optionally leave any comments about the study in the box below.")
+    st.text_area("Comments (optional):", height=120, key="final_comments", label_visibility="collapsed")
+
+    if st.button("Finish & Submit"):
+        demographics   = st.session_state.get("demographics", {})
+        total_duration = time.time() - st.session_state.start_time
+        user_word_count = sum(
+            len(m["content"].split())
+            for m in st.session_state.messages if m["role"] == "user"
+        )
+
+        row = [
+            # ── Core study data ─────────────────────────────────────────────
+            st.session_state.prolific_id,                                                          # col 1
+            st.session_state.prompt_key,                                                           # col 2
+            st.session_state.norm_key,                                                             # col 3
+            json.dumps(st.session_state.get("initial_opinion", {}),       ensure_ascii=False),    # col 4
+            json.dumps(st.session_state.get("opinions_others", {}),       ensure_ascii=False),    # col 5
+            json.dumps(st.session_state.get("messages", []),              ensure_ascii=False),    # col 6
+            str(st.session_state.get("att_check_response_saved", "")),                            # col 7
+            json.dumps(st.session_state.get("final_opinion", {}),         ensure_ascii=False),    # col 8
+            json.dumps(st.session_state.get("opinions_others_final", {}), ensure_ascii=False),    # col 9
+            json.dumps(st.session_state.get("tightness_responses", {}),   ensure_ascii=False),    # col 10
+            str(st.session_state.get("tightness_open", "")),                                      # col 11
+            json.dumps(st.session_state.get("involvement_responses", {}), ensure_ascii=False),    # col 12
+            json.dumps(st.session_state.get("threat_responses", {}),      ensure_ascii=False),    # col 13
+            json.dumps(st.session_state.get("source_responses", {}),      ensure_ascii=False),    # col 14
+            str(st.session_state.get("purpose_text_saved", "")),                                  # col 15
+            # ── Demographics ────────────────────────────────────────────────
+            str(demographics.get("age",           "")),                                            # col 16
+            str(demographics.get("uk_location",   "")),                                            # col 17
+            str(demographics.get("gender",        "")),                                            # col 18
+            str(demographics.get("student",       "")),                                            # col 19
+            str(demographics.get("education",     "")),                                            # col 20
+            str(demographics.get("politics",      "")),                                            # col 21
+            str(demographics.get("social_ladder", "")),                                            # col 22
+            # ── Engagement / timing ─────────────────────────────────────────
+            str(st.session_state.get("engagement_text_saved", "")),                               # col 23
+            str(st.session_state.get("engagement_word_count", 0)),                                # col 24
+            str(st.session_state.get("final_comments", "")),                                      # col 25
+            str(st.session_state.get("parallel_engagement_time",    "")),                         # col 26
+            str(st.session_state.get("sequential_engagement_time",  "")),                         # col 27
+            str(st.session_state.get("interaction_engagement_time", "")),                         # col 28
+            str(sum(1 for m in st.session_state.messages if m["role"] == "user")),                # col 29
+            str(user_word_count),                                                                  # col 30
+            str(round(total_duration, 2)),                                                         # col 31
+            datetime.now().isoformat(),                                                            # col 32
+            # ── Writing task cross-reference ────────────────────────────────
+            str(st.session_state.get("writing_group", "")),                                        # col 33  treatment A/B
+            json.dumps(
+                st.session_state.get("writing_keystroke_log", {}),
+                ensure_ascii=False,
+            ),                                                                                      # col 34  keystroke log JSON
+            str(st.session_state.get("writing_phase_start", "")),                                  # col 35  writing start ISO
+            str(st.session_state.get("writing_phase_end",   "")),                                  # col 36  writing end ISO
+            str(_compute_duration_seconds()),                                                       # col 37  writing duration (s)
+            json.dumps(
+                st.session_state.get("writing_llm_exchanges", []),
+                ensure_ascii=False,
+            ),                                                                                      # col 38  AI chat JSON (Group B)
+            str(st.session_state.get("writing_post_recogn",      "")),                             # col 39  post-writing recogn
+            str(st.session_state.get("writing_post_appropriate",  "")),                             # col 40  post-writing appropriate
+        ]
+
         try:
-            fmt = "%Y-%m-%dT%H:%M:%S.%fZ"
-            t0  = datetime.strptime(st.session_state.writing_phase_start, fmt)
-            t1  = datetime.strptime(st.session_state.writing_phase_end,   fmt)
-            dur = int((t1 - t0).total_seconds())
-            st.write(f"⏱ **Duration:** {dur} seconds ({dur // 60}m {dur % 60}s)")
-        except Exception:
-            pass
+            save_to_google_sheets(row)
+        except Exception as e:
+            st.error(f"There was an error saving your data: {e}. Please contact the researchers before closing this page.")
+            st.stop()
 
-    st.markdown("**Final written text:**")
-    st.text_area("", value=st.session_state.writing_text_final, height=160,
-                 disabled=True, label_visibility="collapsed")
-    final_words = len(st.session_state.writing_text_final.split()) if st.session_state.writing_text_final else 0
-    st.write(f"Word count: **{final_words}**")
-
-    # Keystroke log — filter out meta keys for display
-    real_log = {k: v for k, v in st.session_state.writing_keystroke_log.items()
-                if not k.startswith("__")}
-    n_entries = len(real_log)
-    st.markdown(f"**Autosave log** — {n_entries} 1-second snapshots:")
-    st.json(st.session_state.writing_keystroke_log)
-
-    if st.session_state.writing_group == "B":
-        st.markdown("**AI chat exchanges (with timestamps):**")
-        st.write(f"Number of messages: **{len(st.session_state.writing_llm_exchanges)}**")
-        st.json(st.session_state.writing_llm_exchanges)
-
-    st.markdown("---")
-    st.markdown("## Phase 9.3 — Post-Writing Questionnaire")
-    st.write(f"Reflects personal opinion (1–7): **{st.session_state.writing_post_recogn}**")
-    st.write(f"Post-writing appropriateness (1–7): **{st.session_state.writing_post_appropriate}**")
-
-    st.markdown("---")
-    st.markdown("## Full data payload")
-    payload = {
-        "involvement_responses":   st.session_state.involvement_responses,
-        "threat_responses":        st.session_state.threat_responses,
-        "source_responses":        st.session_state.source_responses,
-        "writing_group":           st.session_state.writing_group,
-        "writing_norm":            WRITING_FIXED_NORM,
-        "writing_text_final":      st.session_state.writing_text_final,
-        "writing_phase_start":     st.session_state.writing_phase_start,
-        "writing_phase_end":       st.session_state.writing_phase_end,
-        "writing_keystroke_log":   st.session_state.writing_keystroke_log,
-        "writing_snapshot_count":  len(real_log),
-        "writing_llm_exchanges":   st.session_state.writing_llm_exchanges,
-        "writing_llm_output":      st.session_state.writing_llm_output,
-        "writing_post_recogn":     st.session_state.writing_post_recogn,
-        "writing_post_appropriate":st.session_state.writing_post_appropriate,
-        "timestamp":               datetime.now().isoformat(),
-    }
-    st.json(payload)
-
-    st.markdown("## Google Sheets columns")
-    sheet_row = [
-        json.dumps(st.session_state.involvement_responses, ensure_ascii=False),
-        json.dumps(st.session_state.threat_responses,      ensure_ascii=False),
-        json.dumps(st.session_state.source_responses,      ensure_ascii=False),
-        str(st.session_state.writing_group),
-        str(st.session_state.writing_phase_start),
-        str(st.session_state.writing_phase_end),
-        json.dumps(st.session_state.writing_keystroke_log, ensure_ascii=False),
-        json.dumps(st.session_state.writing_llm_exchanges, ensure_ascii=False),
-        str(st.session_state.writing_post_recogn),
-        str(st.session_state.writing_post_appropriate),
-    ]
-    col_names = [
-        "col12 involvement", "col13 threat", "col14 source",
-        "col33 writing_group",
-        "col34 writing_phase_start", "col35 writing_phase_end",
-        "col36 keystroke_log", "col37 llm_exchanges",
-        "col38 post_recogn", "col39 post_appropriate",
-    ]
-    for name, val in zip(col_names, sheet_row):
-        with st.expander(name):
-            st.code(val, language="json")
-
-    st.markdown("---")
-    if st.button("🔄 Restart test"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+        st.session_state.data_saved = True
+        st.session_state.phase = 15
         st.rerun()
+
+# ============================================================================
+# PHASE 15 — THANK YOU & PROLIFIC REDIRECT
+# ============================================================================
+elif st.session_state.phase >= 15:
+    st.markdown("## Thank you for participating.")
+    st.markdown("Your responses have been successfully recorded.")
+    st.markdown("Please click the link below to finish the study and retrieve your Prolific completion code.")
+
+    pid          = st.session_state.get("prolific_id", "")
+    base_url     = "https://www.prolific.co/"
+    redirect_url = f"{base_url}?PROLIFIC_PID={pid}"
+    st.markdown(
+        f"[**→ Return to Prolific to complete your submission**]({redirect_url})",
+        unsafe_allow_html=True
+    )

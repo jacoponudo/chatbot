@@ -622,8 +622,7 @@ if st.session_state.phase == -1:
 elif st.session_state.phase == 0:
     st.markdown("## Informed Consent — Data Protection Information")
     st.markdown(
-        "You are invited to participate in a research study conducted by the **Institute for Cognitive "
-        "Science and Technologies (ISTC)** of the National Research Council and **Sapienza University of Rome**."
+        "You are invited to participate in a research study conducted by the **Institute of Cognitive Sciences and Technologies (ISTC)** of the National Research Council and **Sapienza University of Rome**."
     )
     st.markdown(
         "Please read the full informed consent document before proceeding. "
@@ -949,7 +948,7 @@ elif st.session_state.phase == 3:
 
 We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
 
-    st.markdown(f"**What rating do you think other UK participants gave for the action of: '{norm['title']}'?**")
+    st.markdown(f"**What rating do you think other UK participants gave, in this survey, for the action: '{norm['title']}'?**")
     st.markdown("Other respondents' average appropriateness rating:")
     val = likert_7(key=f"likert_p3_{i}")
 
@@ -1179,7 +1178,7 @@ elif st.session_state.phase == 8:
 
 Just like you, the other participants also had a conversation with an AI about this topic before being asked this question again. Please imagine that their opinion may have been influenced by that interaction as well.
 
-We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50.""")
+We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. **If your estimate is correct (±0.5), you will receive an additional bonus of £0.50.**""")
 
     st.markdown(f"**What rating do you think other UK participants gave (after their AI conversation) for the action of: '{title}'?**")
     st.markdown("Other respondents' average appropriateness rating:")

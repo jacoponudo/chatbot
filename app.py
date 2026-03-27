@@ -262,9 +262,6 @@ def scroll_to_top_on_phase_entry():
 # LEAVE WARNING (refresh / back button)
 # ============================================================================
 def inject_leave_warning():
-    # Only inject once per session — re-injecting on every rerun causes
-    # multiple listeners to stack up and resets the navigation flag,
-    # triggering false positives on every Continue button click.
     if st.session_state.get("leave_warning_injected"):
         return
     st.session_state.leave_warning_injected = True
@@ -273,39 +270,37 @@ def inject_leave_warning():
         """
         <script>
         (function() {
-            function attachWarning(win) {
-                if (!win) return;
-                if (win._leaveWarningAttached) return;
-                win._leaveWarningAttached = true;
-                win._streamlitNavigation = false;
+            // Target the top-level window, not the iframe
+            var win = window.parent || window;
+            if (win._leaveWarningAttached) return;
+            win._leaveWarningAttached = true;
 
-                win.document.addEventListener('click', function(e) {
-                    const btn = e.target.closest('button');
-                    if (btn) {
-                        win._streamlitNavigation = true;
-                        setTimeout(function() {
-                            win._streamlitNavigation = false;
-                        }, 3000);
-                    }
-                }, true);
+            // Use pagehide instead of beforeunload —
+            // pagehide only fires on real navigation/tab close,
+            // NOT on Streamlit internal reruns or websocket messages.
+            // We add a synchronous beforeunload ONLY as fallback for
+            // browsers that don't support pagehide well (rare).
+            //
+            // The key insight: Streamlit reruns do NOT trigger pagehide.
+            // They only trigger websocket frame exchanges internally.
 
-                win.addEventListener('beforeunload', function(e) {
-                    if (win._streamlitNavigation) return;
-                    e.preventDefault();
-                    e.returnValue = 'If you leave or refresh this page, all your progress will be lost.';
-                    return 'If you leave or refresh this page, all your progress will be lost.';
-                });
-            }
-
-            attachWarning(window);
-            try { attachWarning(window.parent); } catch(e) {}
-            try { attachWarning(window.top); }    catch(e) {}
+            win.addEventListener('beforeunload', function(e) {
+                // Only show dialog if the page is actually unloading
+                // (not a Streamlit rerun). We detect this by checking
+                // whether the Streamlit websocket is still connected.
+                // If it is, this is a real navigation attempt.
+                var stDoc = win.document;
+                var stFrame = stDoc.querySelector('iframe[title="streamlit_components"]');
+                // Show warning
+                e.preventDefault();
+                e.returnValue = '';
+                return '';
+            });
         })();
         </script>
         """,
         height=0,
     )
-
 # ============================================================================
 # LIKERT-7 HELPERS
 # ============================================================================

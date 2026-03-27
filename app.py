@@ -619,11 +619,7 @@ _active_phases = {  1, 2, 3, 4, 5, 6, 7, 8, 9, 9.1, 9.2, 9.3, 10, 11, 12, 13, 14
 if st.session_state.phase in _active_phases:
     inject_leave_warning()
 
-# ============================================================================
-# [CHANGE 4] HEARTBEAT — active for all study phases to prevent timeout
-# ============================================================================
-if st.session_state.phase in _active_phases:
-    inject_heartbeat()
+
 
 # ============================================================================
 # PHASE -1 — EARLY TERMINATION

@@ -1729,8 +1729,7 @@ elif st.session_state.phase >= 15:
     st.markdown("Please click the link below to finish the study and retrieve your Prolific completion code.")
 
     pid          = st.session_state.get("prolific_id", "")
-    base_url     = "https://www.prolific.co/"
-    redirect_url = f"{base_url}?PROLIFIC_PID={pid}"
+    redirect_url = "https://app.prolific.com/submissions/complete?cc=C170N37L"
     st.markdown(
         f"[**→ Return to Prolific to complete your submission**]({redirect_url})",
         unsafe_allow_html=True

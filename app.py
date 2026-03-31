@@ -1452,7 +1452,7 @@ elif st.session_state.phase == 9.3:
             dur_s = _compute_duration_seconds()
             writing_row = [
                 st.session_state.prolific_id,
-                st.session_state.get("writing_group_raw", ""),
+                raw,
                 writing_norm,
                 st.session_state.get("writing_text_final", ""),
                 json.dumps(st.session_state.get("writing_keystroke_log", {}), ensure_ascii=False),

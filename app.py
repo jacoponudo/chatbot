@@ -1233,7 +1233,7 @@ elif st.session_state.phase == 9:
         st.session_state.involvement_responses = {l: st.session_state[k] for l, k in involvement_items}
         st.session_state.threat_responses      = {l: st.session_state[k] for l, k in threat_items}
         st.session_state.source_responses      = {l: st.session_state[k] for l, k in source_items}
-        st.session_state.phase = 9.1
+        st.session_state.phase = 7
         st.rerun()
 
 # ============================================================================

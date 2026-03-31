@@ -523,7 +523,7 @@ if "session_initialized" not in st.session_state:
     st.session_state.update({
         "session_initialized":          True,
         "prolific_id":                  prolific_id,
-        "phase":                        0,
+        "phase":                        8,
         "messages":                     [],
         "greeting_sent":                False,
         "data_saved":                   False,
@@ -539,7 +539,6 @@ if "session_initialized" not in st.session_state:
         # Writing task
         "writing_word_min":             random.choice([50]),
         "writing_group_raw":            random.choice(["control"]),#, "neutral","bias"]),
-        "writing_group":                None,
         "writing_norm":                 None,
         "writing_text_final":           "",
         "writing_keystroke_log":        {},
@@ -561,11 +560,8 @@ if "session_initialized" not in st.session_state:
     })
 
 
-if st.session_state.get("writing_group") is None:
-    raw  = st.session_state.writing_group_raw
-    wmin = st.session_state.writing_word_min
-    st.session_state.writing_group = st.session_state.writing_group_raw
 WORD_MIN = st.session_state.writing_word_min
+raw  = st.session_state.writing_group_raw
 
 # ============================================================================
 # SCROLL TO TOP ON FIRST ENTRY INTO CURRENT PHASE
@@ -1372,8 +1368,6 @@ elif st.session_state.phase == 9.2:
                     "- End with 1-2 neutral, bland sentences that soften the tone again, as if reflecting or stepping back. "
                     "Do not ask questions or discuss the task — just write the text directly."
                 )
-            else: 
-                print('super error of prompt')
 
             st.session_state.writing_chat             = writing_chat
             st.session_state.writing_chat_initialized = True

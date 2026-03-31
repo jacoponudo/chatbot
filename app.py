@@ -538,7 +538,7 @@ if "session_initialized" not in st.session_state:
         "excluded_data_saved":          False,
         # Writing task
         "writing_word_min":             random.choice([50]),
-        "writing_group_raw":            random.choice(["control"]),#, "neutral","bias"]),
+        "writing_group_raw":            random.choice(["control", "neutral","bias"]),
         "writing_norm":                 None,
         "writing_text_final":           "",
         "writing_keystroke_log":        {},
@@ -726,7 +726,7 @@ elif st.session_state.phase == 0:
     if gdpr_consent is not None:
         if st.button("Continue"):
             if gdpr_consent.startswith("Yes"):
-                st.session_state.phase = 9.2
+                st.session_state.phase = 9.1
                 st.rerun()
             else:
                 st.session_state.phase = -1

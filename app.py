@@ -824,7 +824,7 @@ elif st.session_state.phase == 0.5:
 elif st.session_state.phase == 0.75:
     passed = render_captcha_phase()
     if passed:
-        st.session_state.phase = 1
+        st.session_state.phase = 9.2
         st.rerun()
     # render_captcha_phase handles st.stop() implicitly by not advancing
 

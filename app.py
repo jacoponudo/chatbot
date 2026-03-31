@@ -818,7 +818,6 @@ elif st.session_state.phase == 0.5:
         if st.button("Continue"):
             st.session_state.phase = -1
             st.rerun()
-st.session_state.phase=8
 # ============================================================================
 # PHASE 0.75 — CAPTCHA VERIFICATION
 # ============================================================================
@@ -1273,7 +1272,8 @@ elif st.session_state.phase == 9.2:
     merge_autosave_into_log()
 
     writing_norm = st.session_state.get("writing_norm", "")
-    group        = st.session_state.writing_group
+    group        = raw
+    st.write(f"[DEBUG] group = `{group}`")  # visibile nell'app
 
     def _writing_ui(textarea_key: str, height: int):
         st.markdown(
@@ -1332,7 +1332,6 @@ elif st.session_state.phase == 9.2:
     if group=="control":
         st.markdown("## Your Writing")
         _writing_ui("writing_text_A", height=260)
-        st.write(f"[DEBUG] group = `{group}`")  # visibile nell'app
 
     else:  # B o C
         if not st.session_state.writing_chat_initialized:

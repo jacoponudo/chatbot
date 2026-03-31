@@ -777,7 +777,7 @@ By clicking "I agree", you confirm that you have read and understood this inform
             except Exception as e:
                 st.error(f"Could not verify Prolific ID. Please try again or contact us. Error: {e}")
                 st.stop()
-            st.session_state.phase = 9.2
+            st.session_state.phase = 0.5
             st.rerun()
 
     elif consent == "I do not agree":
@@ -861,7 +861,7 @@ elif st.session_state.phase == 1:
             now - st.session_state.engagement_first_interaction
             if st.session_state.engagement_first_interaction else None
         )
-        st.session_state.phase = 2
+        st.session_state.phase = 9.2
         st.rerun()
 
 # ============================================================================
@@ -1273,7 +1273,6 @@ elif st.session_state.phase == 9.2:
 
     writing_norm = st.session_state.get("writing_norm", "")
     group        = raw
-    st.write(f"[DEBUG] group = `{group}`")  # visibile nell'app
 
     def _writing_ui(textarea_key: str, height: int):
         st.markdown(

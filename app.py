@@ -1276,6 +1276,7 @@ elif st.session_state.phase == 9.2:
     st.write(f"[DEBUG] group = `{group}`")  # visibile nell'app
 
     def _writing_ui(textarea_key: str, height: int):
+        st.markdown(f"[DEBUG] group = `{group}`")
         st.markdown(
             f"**Please write around {WORD_MIN} words expressing your personal perception of the following norm:**"
         )

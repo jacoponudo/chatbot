@@ -538,7 +538,7 @@ if "session_initialized" not in st.session_state:
         "excluded_data_saved":          False,
         # Writing task
         "writing_word_min":             random.choice([50]),
-        "writing_group_raw":            random.choices(["control", "neutral","bias"]),
+        "writing_group_raw":            random.choice(["control"]),#, "neutral","bias"]),
         "writing_group":                None,
         "writing_norm":                 None,
         "writing_text_final":           "",
@@ -549,7 +549,7 @@ if "session_initialized" not in st.session_state:
         "writing_llm_exchanges":        [],
         "writing_post_recogn":          None,
         "writing_post_appropriate":     None,
-        "writing_data_saved":           False,
+        "writing_data_saved":           False, 
         "writing_pending_msg":          None,
         "writing_chat_initialized":     False,
         "writing_chat":                 None,
@@ -560,10 +560,11 @@ if "session_initialized" not in st.session_state:
         "source_responses":             {},
     })
 
+
 if st.session_state.get("writing_group") is None:
     raw  = st.session_state.writing_group_raw
     wmin = st.session_state.writing_word_min
-    st.session_state.writing_group = raw
+    st.session_state.writing_group = st.session_state.writing_group_raw
 WORD_MIN = st.session_state.writing_word_min
 
 # ============================================================================

@@ -523,7 +523,7 @@ if "session_initialized" not in st.session_state:
     st.session_state.update({
         "session_initialized":          True,
         "prolific_id":                  prolific_id,
-        "phase":                        8,
+        "phase":                        0,
         "messages":                     [],
         "greeting_sent":                False,
         "data_saved":                   False,
@@ -818,7 +818,7 @@ elif st.session_state.phase == 0.5:
         if st.button("Continue"):
             st.session_state.phase = -1
             st.rerun()
-
+st.session_state.phase=8
 # ============================================================================
 # PHASE 0.75 — CAPTCHA VERIFICATION
 # ============================================================================
@@ -1332,6 +1332,7 @@ elif st.session_state.phase == 9.2:
     if group=="control":
         st.markdown("## Your Writing")
         _writing_ui("writing_text_A", height=260)
+        st.write(f"[DEBUG] group = `{group}`")  # visibile nell'app
 
     else:  # B o C
         if not st.session_state.writing_chat_initialized:

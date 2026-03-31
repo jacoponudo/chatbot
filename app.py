@@ -861,7 +861,7 @@ elif st.session_state.phase == 1:
             now - st.session_state.engagement_first_interaction
             if st.session_state.engagement_first_interaction else None
         )
-        st.session_state.phase = 9.2
+        st.session_state.phase = 2
         st.rerun()
 
 # ============================================================================

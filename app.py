@@ -563,7 +563,7 @@ if "session_initialized" not in st.session_state:
 if st.session_state.get("writing_group") is None:
     raw  = st.session_state.writing_group_raw
     wmin = st.session_state.writing_word_min
-    st.session_state.writing_group = f"{raw}{wmin}"
+    st.session_state.writing_group = raw
 WORD_MIN = st.session_state.writing_word_min
 
 # ============================================================================
@@ -1356,7 +1356,7 @@ elif st.session_state.phase == 9.2:
                     "Do not ask questions or discuss the task — just write the text directly."
                 )
 
-            elif group=="['bias']50":
+            elif group=="bias":
                 # Prompt con bias (come nel tuo esempio originale)
                 writing_chat.send_message(
                     "You are an assistant."

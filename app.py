@@ -1332,7 +1332,7 @@ elif st.session_state.phase == 9.2:
         st.session_state.writing_keystroke_log = log
         st.session_state.phase = 9.3
         st.rerun()
-    if group == "control":
+    if "control" in group:
         st.markdown("## Your Writing")
         _writing_ui("writing_text_A", height=260)
 
@@ -1341,7 +1341,7 @@ elif st.session_state.phase == 9.2:
             model        = get_gemini_model()
             writing_chat = model.start_chat()
 
-            if group == "neutral":
+            if "neutral" in group:
                 # Prompt neutro senza bias
                 writing_chat.send_message(
                     "You are an assistant."

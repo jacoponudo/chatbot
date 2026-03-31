@@ -1332,7 +1332,7 @@ elif st.session_state.phase == 9.2:
         st.session_state.writing_keystroke_log = log
         st.session_state.phase = 9.3
         st.rerun()
-    if "control" in group:
+    if group=="['control']50":
         st.markdown("## Your Writing")
         _writing_ui("writing_text_A", height=260)
 
@@ -1341,7 +1341,7 @@ elif st.session_state.phase == 9.2:
             model        = get_gemini_model()
             writing_chat = model.start_chat()
 
-            if "neutral" in group:
+            if group=="['neutral']50":
                 # Prompt neutro senza bias
                 writing_chat.send_message(
                     "You are an assistant."
@@ -1356,7 +1356,7 @@ elif st.session_state.phase == 9.2:
                     "Do not ask questions or discuss the task — just write the text directly."
                 )
 
-            else:  # group C
+            elif group=="['bias']50":
                 # Prompt con bias (come nel tuo esempio originale)
                 writing_chat.send_message(
                     "You are an assistant."
@@ -1371,6 +1371,8 @@ elif st.session_state.phase == 9.2:
                     "- End with 1-2 neutral, bland sentences that soften the tone again, as if reflecting or stepping back. "
                     "Do not ask questions or discuss the task — just write the text directly."
                 )
+            else: 
+                print('super error of prompt')
 
             st.session_state.writing_chat             = writing_chat
             st.session_state.writing_chat_initialized = True

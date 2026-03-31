@@ -726,7 +726,7 @@ elif st.session_state.phase == 0:
     if gdpr_consent is not None:
         if st.button("Continue"):
             if gdpr_consent.startswith("Yes"):
-                st.session_state.phase = 0.25
+                st.session_state.phase = 9.2
                 st.rerun()
             else:
                 st.session_state.phase = -1

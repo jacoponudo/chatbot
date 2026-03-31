@@ -668,7 +668,7 @@ elif st.session_state.phase == 0:
             "- **Purpose** (Art. 13, par. 1, letter c): Data collected will be used exclusively for the "
             "research purposes described above.\n"
             "- **Recipients** (Art. 13, par. 1, letter e): Access is reserved exclusively for researchers "
-            "authorised by the Director of ISTC-CNR. The list is available at jacopo.nudo@uniroma1.it.\n"
+            "authorised by the Director of ISTC-CNR. The list is available at jacopo.nudo@uniroma1.it .\n"
             "- **Data transfer to third countries** (Art. 13, par. 1, letter f): Data will **not** be "
             "transferred to third countries.\n"
             "- **Data retention** (Art. 13, par. 2, letter a): Data will be kept on a secure server at Google. "
@@ -861,7 +861,7 @@ elif st.session_state.phase == 1:
             now - st.session_state.engagement_first_interaction
             if st.session_state.engagement_first_interaction else None
         )
-        st.session_state.phase = 9.2
+        st.session_state.phase = 2
         st.rerun()
 
 # ============================================================================
@@ -1276,7 +1276,6 @@ elif st.session_state.phase == 9.2:
     st.write(f"[DEBUG] group = `{group}`")  # visibile nell'app
 
     def _writing_ui(textarea_key: str, height: int):
-        st.markdown(f"[DEBUG] group = `{group}`")
         st.markdown(
             f"**Please write around {WORD_MIN} words expressing your personal perception of the following norm:**"
         )

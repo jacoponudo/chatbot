@@ -6,6 +6,7 @@ import json
 import os
 import time
 import random
+import string
 from collections import defaultdict
 
 import vertexai
@@ -13,6 +14,7 @@ from vertexai.generative_models import GenerativeModel, ChatSession
 import threading
 
 from streamlit_autorefresh import st_autorefresh
+from captcha.image import ImageCaptcha
 
 # ============================================================================
 # PAGE CONFIG
@@ -40,15 +42,13 @@ NORMS   = load_json("norms.json")
 # ============================================================================
 # WRITING TASK CONSTANTS
 # ============================================================================
-WRITING_FIXED_NORM = "not telling someone they have gained weight"
-WORD_MIN           = 50
 
 LIKERT_LABELS_RECOGN = [
     "Not at all", "Slightly", "Somewhat", "Moderately", "Very", "Mostly", "Completely",
 ]
 LIKERT_LABELS_APPROP_WRITING = [
     "Extremely\ninappropriate", "Very\ninappropriate", "Somewhat\ninappropriate",
-    "Neither", "Somewhat\nappropriate", "Very\nappropriate", "Extremely\nappropriate",
+    "Neither inappropriate or appropriate", "Somewhat\nappropriate", "Very\nappropriate", "Extremely\nappropriate",
 ]
 
 # ============================================================================
@@ -111,6 +111,56 @@ def get_least_used_combination():
 
 def save_to_google_sheets(row):
     get_sheet().append_row(row, value_input_option="RAW")
+
+# ============================================================================
+# SAVE EXCLUDED PARTICIPANTS
+# ============================================================================
+def save_excluded_participant(reason: str):
+    """Save a partial row for participants excluded mid-study."""
+    if st.session_state.get("excluded_data_saved"):
+        return
+    try:
+        row = [
+            st.session_state.get("prolific_id", ""),
+            st.session_state.get("prompt_key", ""),
+            st.session_state.get("norm_key", ""),
+            json.dumps(st.session_state.get("initial_opinion", {}),  ensure_ascii=False),
+            json.dumps(st.session_state.get("opinions_others", {}),  ensure_ascii=False),
+            json.dumps(st.session_state.get("messages", []),         ensure_ascii=False),
+            str(st.session_state.get("att_check_response_saved", "")),
+            str(st.session_state.get("att_check_passed", "")),
+            "",  # final_opinion — not reached
+            "",  # opinions_others_final — not reached
+            "",  # tightness_responses — not reached
+            "",  # tightness_open
+            "",  # involvement_responses
+            "",  # threat_responses
+            "",  # source_responses
+            "",  # purpose_text
+            "",  # age
+            "",  # uk_location
+            "",  # gender
+            "",  # student
+            "",  # education
+            "",  # politics
+            "",  # social_ladder
+            str(st.session_state.get("engagement_text_saved", "")),
+            str(st.session_state.get("engagement_word_count", 0)),
+            "",  # final_comments
+            str(st.session_state.get("parallel_engagement_time",    "")),
+            str(st.session_state.get("sequential_engagement_time",  "")),
+            str(st.session_state.get("interaction_engagement_time", "")),
+            str(sum(1 for m in st.session_state.get("messages", []) if m["role"] == "user")),
+            "",  # user_word_count
+            "",  # total_duration
+            datetime.now().isoformat(),
+            f"EXCLUDED: {reason}",  # writing_group field repurposed as exclusion tag
+            "", "", "", "", "", "",
+        ]
+        save_to_google_sheets(row)
+        st.session_state.excluded_data_saved = True
+    except Exception:
+        pass  # silent — don't block the termination screen
 
 # ============================================================================
 # VERTEX AI / GEMINI CLIENT — lazy
@@ -209,11 +259,51 @@ def scroll_to_top_on_phase_entry():
         st.session_state.last_scrolled_phase = current_phase
 
 # ============================================================================
+# LEAVE WARNING (refresh / back button)
+# ============================================================================
+def inject_leave_warning():
+    if st.session_state.get("leave_warning_injected"):
+        return
+    st.session_state.leave_warning_injected = True
+
+    # Inietta nel DOM principale, NON in un iframe
+    st.markdown(
+        """
+        <script>
+        (function() {
+            if (window._leaveWarningAttached) return;
+            window._leaveWarningAttached = true;
+
+            var lastRerun = Date.now();
+
+            // Intercetta i messaggi WebSocket di Streamlit
+            // per distinguere rerun interni da navigazione reale
+            var _origWS = window.WebSocket;
+            function PatchedWS(url, proto) {
+                var ws = proto ? new _origWS(url, proto) : new _origWS(url);
+                ws.addEventListener('message', function() { lastRerun = Date.now(); });
+                ws.addEventListener('open',    function() { lastRerun = Date.now(); });
+                return ws;
+            }
+            PatchedWS.prototype = _origWS.prototype;
+            window.WebSocket = PatchedWS;
+
+            window.addEventListener('beforeunload', function(e) {
+                if (Date.now() - lastRerun < 1000) return;
+                e.preventDefault();
+                e.returnValue = '';
+            });
+        })();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+# ============================================================================
 # LIKERT-7 HELPERS
 # ============================================================================
 LIKERT_LABELS = [
     "Extremely inappropriate", "Very inappropriate", "Somewhat inappropriate",
-    "Neither", "Somewhat appropriate", "Very appropriate", "Extremely appropriate",
+    "Neither inappropriate or appropriate", "Somewhat appropriate", "Very appropriate", "Extremely appropriate",
 ]
 
 def likert_7(key, labels=None):
@@ -232,15 +322,13 @@ def likert_7(key, labels=None):
     st.markdown("<br>", unsafe_allow_html=True)
     return st.session_state.get(key)
 
-# Phase 9 perception scale — text labels, no numbers
 def render_7pt_item(label, key):
-    """Single Likert item with text labels (Totally disagree → Totally agree)."""
     st.markdown(f"**{label}**")
     cols     = st.columns(7)
     selected = st.session_state.get(key)
     scale_labels = [
         "Totally\ndisagree", "Mostly\ndisagree", "Somewhat\ndisagree",
-        "Neither", "Somewhat\nagree", "Mostly\nagree", "Totally\nagree",
+        "Neither inappropriate or appropriate", "Somewhat\nagree", "Mostly\nagree", "Totally\nagree",
     ]
     for j in range(1, 8):
         with cols[j - 1]:
@@ -252,11 +340,6 @@ def render_7pt_item(label, key):
 
 # ============================================================================
 # AUTOSAVE JS HELPERS
-#
-# Every 1 s JS samples the textarea → writes {ISO_ts: text} into a hidden
-# input (autosave_json_sink).  A flip-flop hidden input (autosave_trigger)
-# forces a Streamlit rerun each second so Python can merge the log.
-# merge_autosave_into_log() accumulates new entries into writing_keystroke_log.
 # ============================================================================
 AUTOSAVE_SINK_LABEL    = "autosave_json_sink"
 AUTOSAVE_TRIGGER_LABEL = "autosave_trigger"
@@ -340,7 +423,6 @@ def merge_autosave_into_log():
 
 
 def _compute_duration_seconds() -> int:
-    """Compute writing phase duration in seconds from start/end ISO strings."""
     try:
         fmt = "%Y-%m-%dT%H:%M:%S.%fZ"
         t0  = datetime.strptime(st.session_state.writing_phase_start, fmt)
@@ -348,6 +430,83 @@ def _compute_duration_seconds() -> int:
         return int((t1 - t0).total_seconds())
     except Exception:
         return -1
+
+# ============================================================================
+# CAPTCHA HELPER
+# ============================================================================
+CAPTCHA_LENGTH  = 5
+CAPTCHA_WIDTH   = 200
+CAPTCHA_HEIGHT  = 150
+CAPTCHA_MAX_ATTEMPTS = 3
+
+def render_captcha_phase():
+    """
+    Renders the CAPTCHA screen. Returns True if the user has already passed,
+    False if they are still on this screen.
+    After CAPTCHA_MAX_ATTEMPTS failures the participant is sent to phase -1.
+    """
+    if st.session_state.get("captcha_passed"):
+        return True
+
+    # Initialise attempt counter
+    if "captcha_attempts" not in st.session_state:
+        st.session_state.captcha_attempts = 0
+
+    # Already exceeded max attempts → redirect to exclusion
+    if st.session_state.captcha_attempts >= CAPTCHA_MAX_ATTEMPTS:
+        st.session_state.excluded_reason = "failed_captcha"
+        st.session_state.phase = -1
+        st.rerun()
+
+    remaining_attempts = CAPTCHA_MAX_ATTEMPTS - st.session_state.captcha_attempts
+
+    st.markdown("## Human Verification")
+    st.markdown("Please complete the verification below to continue.")
+
+    if remaining_attempts < CAPTCHA_MAX_ATTEMPTS:
+        st.warning(
+            f"Incorrect code. Please try again. "
+            f"You have **{remaining_attempts}** attempt{'s' if remaining_attempts != 1 else ''} remaining."
+        )
+
+    # Generate a captcha string once per attempt
+    if "captcha_text" not in st.session_state:
+        st.session_state.captcha_text = "".join(
+            random.choices(string.ascii_uppercase + string.digits, k=CAPTCHA_LENGTH)
+        )
+
+    image = ImageCaptcha(width=CAPTCHA_WIDTH, height=CAPTCHA_HEIGHT)
+    data  = image.generate(st.session_state.captcha_text)
+
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.image(data)
+    with col2:
+        user_input = st.text_input(
+            "Enter the characters shown in the image:",
+            key=f"captcha_input_{st.session_state.captcha_attempts}"
+        )
+
+    if st.button("Verify"):
+        entered = (
+            st.session_state.get(f"captcha_input_{st.session_state.captcha_attempts}", "")
+            .replace(" ", "").strip().upper()
+        )
+        if entered == st.session_state.captcha_text.upper():
+            st.session_state.captcha_passed = True
+            del st.session_state["captcha_text"]
+            st.rerun()
+        else:
+            st.session_state.captcha_attempts += 1
+            if "captcha_text" in st.session_state:
+                del st.session_state["captcha_text"]
+            # Check immediately if now over the limit
+            if st.session_state.captcha_attempts >= CAPTCHA_MAX_ATTEMPTS:
+                st.session_state.excluded_reason = "failed_captcha"
+                st.session_state.phase = -1
+            st.rerun()
+
+    return False
 
 # ============================================================================
 # PROLIFIC ID
@@ -374,28 +533,35 @@ if "session_initialized" not in st.session_state:
         "gemini_chat":                  None,
         "system_prompt_cache":          None,
         "last_scrolled_phase":          None,
+        "captcha_passed":               False,
+        "excluded_reason":              None,
+        "excluded_data_saved":          False,
         # Writing task
-        "writing_group":                random.choice(["A", "B"]),
-        "writing_text_final":           "",      # plain text of final submission
-        "writing_keystroke_log":        {},      # {ISO_ts: text_snapshot} — autosave log
+        "writing_word_min":             random.choice([50]),
+        "writing_group_raw":            random.choice(["control", "neutral"]),# ,"bias"
+        "writing_norm":                 None,
+        "writing_text_final":           "",
+        "writing_keystroke_log":        {},
         "writing_last_saved_text":      None,
         "writing_llm_streaming":        False,
         "writing_llm_output":           "",
-        "writing_llm_exchanges":        [],      # [{role, content, timestamp}]
+        "writing_llm_exchanges":        [],
         "writing_post_recogn":          None,
         "writing_post_appropriate":     None,
-        "writing_data_saved":           False,
+        "writing_data_saved":           False, 
         "writing_pending_msg":          None,
         "writing_chat_initialized":     False,
         "writing_chat":                 None,
-        # Writing timing
-        "writing_phase_start":          None,    # ISO UTC — set at 9.1 → 9.2 transition
-        "writing_phase_end":            None,    # ISO UTC — set when Continue → clicked
-        # Involvement / threat / source (phase 9)
+        "writing_phase_start":          None,
+        "writing_phase_end":            None,
         "involvement_responses":        {},
         "threat_responses":             {},
         "source_responses":             {},
     })
+
+
+WORD_MIN = st.session_state.writing_word_min
+raw  = st.session_state.writing_group_raw
 
 # ============================================================================
 # SCROLL TO TOP ON FIRST ENTRY INTO CURRENT PHASE
@@ -403,9 +569,40 @@ if "session_initialized" not in st.session_state:
 scroll_to_top_on_phase_entry()
 
 # ============================================================================
+# LEAVE WARNING — active for all phases between 1 and 13 inclusive
+# (not on consent/intro screens, not on termination, not after submission)
+# ============================================================================
+# Inject once when the participant enters the first "active" phase
+if st.session_state.phase >= 0 and not st.session_state.get("leave_warning_injected"):
+    inject_leave_warning()
+# ============================================================================
 # PHASE -1 — EARLY TERMINATION
 # ============================================================================
 if st.session_state.phase == -1:
+
+    # Determine exclusion reason (set once)
+    if not st.session_state.get("excluded_reason"):
+        gdpr_val    = st.session_state.get("gdpr_consent_radio", "")
+        consent_val = st.session_state.get("consent_radio", "")
+        quality_val = st.session_state.get("quality_radio", "")
+
+        if gdpr_val and not gdpr_val.startswith("Yes"):
+            reason = "refused_gdpr_consent"
+        elif consent_val == "I do not agree":
+            reason = "refused_study_consent"
+        elif quality_val in ("I will not provide my best answers", "I can't promise either way"):
+            reason = "failed_quality_check"
+        elif st.session_state.get("att_check_passed") is False:
+            reason = "failed_attention_check"
+        elif st.session_state.get("excluded_reason") == "failed_captcha":
+            reason = "failed_captcha"
+        else:
+            reason = "unknown"
+        st.session_state.excluded_reason = reason
+
+    # Save once, silently
+    save_excluded_participant(st.session_state.excluded_reason)
+
     st.markdown("## Thank you for your time.")
     st.markdown(
         "Unfortunately, your answer makes it impossible for us to include you in this study. "
@@ -414,33 +611,154 @@ if st.session_state.phase == -1:
     st.stop()
 
 # ============================================================================
-# PHASE 0 — CONSENT FORM
+# PHASE 0 — GDPR INFORMED CONSENT
+# ============================================================================
+# CHANGE 1: The full GDPR consent text is now inside a collapsible expander.
+# A brief intro and the radio buttons remain visible at the top level.
 # ============================================================================
 elif st.session_state.phase == 0:
+    st.markdown("## Informed Consent — Data Protection Information")
+    st.markdown(
+        "You are invited to participate in a research study conducted by the **Institute of Cognitive Sciences and Technologies (ISTC)** of the National Research Council and **Sapienza University of Rome**."
+    )
+    st.markdown(
+        "Please read the full informed consent document before proceeding. "
+        "Click the section below to expand it."
+    )
+
+    with st.expander("📄 Read the full informed consent", expanded=False):
+        st.markdown(
+            "You are accessing the study by logging in with your Prolific ID. This is the only information "
+            "researchers will obtain from you via Prolific. The data you share with Prolific are treated in "
+            "full compliance with GDPR. The study will be carried out as an online survey programmed in Streamlit. "
+            "All personal data about you will be collected through the survey from you — we do not obtain "
+            "information about you from any other sources. Your personal data will not be used for automated "
+            "decision-making including profiling."
+        )
+
+        st.markdown("### Data")
+        st.markdown(
+            "To carry out this processing operation the following categories of personal data may be processed:\n\n"
+            "- **Socio-demographic information** (age, gender, educational level, income)\n"
+            "- **Responses** to the questions included in the survey\n\n"
+            "In addition, the survey tool may register:\n\n"
+            "- **IP address and geolocation** of the respondent.\n\n"
+            "These data will **not** be downloaded or processed by ISTC or Sapienza University of Rome and "
+            "will remain on the server of the survey tool for as long as required (see Data Retention below).\n\n"
+            "You may spontaneously provide other non-requested personal data in open-text replies. "
+            "The Data Controller does not request nor expect special categories of data under Article 10(1) "
+            "of Regulation 2018/1725 (data revealing racial or ethnic origin, political opinions, religious "
+            "or philosophical beliefs, trade union membership, genetic/biometric data, health data, or data "
+            "concerning sex life or sexual orientation). Any spontaneous inclusion of these types of data is "
+            "the responsibility of the data subject and constitutes explicit consent under Article 10(2)(a) "
+            "of Regulation 2018/1725.\n\n"
+            "All data collected will be treated in accordance with **GDPR 2016/679** and the analogous "
+            "Italian regulation (Legislative Decree 30 June 2003, n. 196)."
+        )
+
+        st.markdown("### Role and Contacts")
+        st.markdown(
+            "- **Data Controller** (Art. 13, par. 1, letter a): Institute for Cognitive Science and "
+            "Technologies, ISTC-CNR — direzione.istc@istc.cnr.it — Tel: 06 44595246\n"
+            "- **Data Protection Officer** (Art. 13, par. 1, letter b): rpd@cnr.it"
+        )
+
+        st.markdown("### Purposes for Data Processing, Transfer and Retention")
+        st.markdown(
+            "- **Purpose** (Art. 13, par. 1, letter c): Data collected will be used exclusively for the "
+            "research purposes described above.\n"
+            "- **Recipients** (Art. 13, par. 1, letter e): Access is reserved exclusively for researchers "
+            "authorised by the Director of ISTC-CNR. The list is available at jacopo.nudo@uniroma1.it.\n"
+            "- **Data transfer to third countries** (Art. 13, par. 1, letter f): Data will **not** be "
+            "transferred to third countries.\n"
+            "- **Data retention** (Art. 13, par. 2, letter a): Data will be kept on a secure server at Google. "
+            "Access by Google is restricted and requires authorisation.\n"
+            "- **Processing for other purposes** (Art. 13, par. 3): Data will be used exclusively for the "
+            "research purposes described above."
+        )
+
+        st.markdown("### Your Rights")
+        st.markdown(
+            "- **Right of access, rectification, cancellation or limitation** (Art. 13, par. 2, letter b): "
+            "You may request access to data at any time within 3 years of processing and have the right to "
+            "have it removed, rectified, or restricted, including data portability.\n"
+            "- **Right to withdraw consent** (Art. 13, par. 2, letter c): You may revoke your consent within "
+            "3 years by contacting us and asking not to use your data.\n"
+            "- **Right to lodge a complaint** (Art. 13, par. 2, letter d): Within 3 years of the treatment "
+            "you may lodge a complaint with the Data Protection Authority.\n"
+            "- **Providing personal data** (Art. 13, par. 2, letter e): By participating you accept all the "
+            "purposes described above and provide the Data Controller with your personal data.\n\n"
+            "To exercise your rights, write to **jacopo.nudo@uniroma1.it** including your Prolific ID."
+        )
+
+        st.markdown("### Legal Basis")
+        st.markdown(
+            "Legal basis (Art. 9, par. 2, letter a): the processing is legally authorised with the "
+            "explicit acceptance of this Informed Consent."
+        )
+
+    st.markdown("---")
+    st.markdown("### Declaration")
+    st.markdown(
+        "By selecting **'Yes, I agree'** below, I declare that:\n\n"
+        "- I have read and understood the contents of this Information Sheet;\n"
+        "- I have been informed about the objectives of the study and have had enough time to make my decision;\n"
+        "- I understand that my participation is **voluntary** and that I am free to withdraw at any time "
+        "without giving any explanation, and that my data will not be used if I withdraw;\n"
+        "- I have been informed that data collected will remain **anonymous and protected** according to "
+        "GDPR n. 2016/679 and Legislative Decree 30 June 2003 n. 196;\n"
+        "- I consent to the processing of personal data for the scientific study purposes described above "
+        "and to the publication of anonymous results for scientific purposes;\n"
+        "- I am aware that data recorded during the study can only be viewed by specifically authorised "
+        "personnel and allow these persons to access data relevant to this study."
+    )
+
+    gdpr_consent = st.radio(
+        "Your response:",
+        options=[
+            "Yes, I agree with the above stated terms and want to participate in this survey",
+            "No, I do not want to participate in this survey",
+        ],
+        index=None,
+        key="gdpr_consent_radio",
+    )
+
+    if gdpr_consent is not None:
+        if st.button("Continue"):
+            if gdpr_consent.startswith("Yes"):
+                st.session_state.phase = 0.25
+                st.rerun()
+            else:
+                st.session_state.phase = -1
+                st.rerun()
+
+# ============================================================================
+# PHASE 0.25 — STUDY CONSENT FORM
+# ============================================================================
+elif st.session_state.phase == 0.25:
     preload_gemini_in_background()
     st.markdown("## Thank you for joining our study!")
+
     st.markdown("""
-**Before proceeding, please read carefully the information reported below.**
+**Before proceeding, please read the information below.**
 
 **Aim of the Study**  
-You are being invited to participate in a study of social norms. The purpose of this study is to analyze everyday norms – i.e., norms about behavior that many people perform regularly, and most people could perform if they wanted to – and to understand how people engage in conversations about these topics with an advanced AI.
+You are invited to participate in a study on social norms. The goal is to understand how people evaluate everyday behaviors and how they discuss these topics with an advanced AI.
 
 **What will I be asked to do?**  
-If you agree to take part, you will be asked to answer a set of survey questions related to social norms. These include questions about how appropriate you and other people think behaviors are in different settings. Concerning questions about how other people perceive behaviors, you will receive a bonus payment if you make a correct guess. Next, you will participate in a conversation with an advanced AI about some of the topics and opinions that you have already answered questions about earlier. The study should take approximately 12 minutes to complete.
+You will complete a short survey about social norms and then engage in a brief conversation with an AI based on your responses.  
+The study takes approximately 12 minutes. Some questions include bonus payments (£0.50 each, up to £1 total).
 
-**Can I change my mind?**  
-Participation is voluntary and you can decline to participate in the research or any aspects of the research at any time without penalty. You may withdraw by simply closing the browser on the computer. It will not be possible for you to withdraw after the completion of the survey because your responses are anonymous.
+**Voluntary participation**  
+Your participation is voluntary. You may stop at any time by closing the browser. After completing the study, withdrawal will no longer be possible due to data anonymization.
 
 **Risks and benefits**  
-There are no direct risk to you as a participant. Study results will help inform the scholarly understanding of AI conversations about everyday norms work. There is a risk that some of the questions may be sensitive and/or could cause you psychological distress. You don't have to answer any questions you don't want to. There are questions where you will receive a bonus payment of £0.50 if you answer correctly (two questions, for a maximum of £1).
+There are no direct risks. Some questions may feel sensitive; you may skip any question you prefer not to answer.
 
-**Privacy and data**  
-The data that you provide will be anonymous so your responses cannot be linked back to you. The study data will be stored on an encrypted server at *(TBD)*. The anonymous dataset will be stored indefinitely and shared with other researchers for research and teaching purposes. We plan to publish the results of this study in academic journals and present them at conferences.
+**Contact**  
+For any questions about the study, please contact: **jacopo.nudo@uniroma1.it**
 
-**Any questions?**  
-If you have any questions about the research, please contact jacopo.nudo@uniroma1.it .
-
-By clicking "I agree" below you are indicating that you have read this information and agree to participate in this research study.
+By clicking "I agree", you confirm that you have read and understood this information and agree to participate.
 """)
 
     consent = st.radio(
@@ -461,6 +779,7 @@ By clicking "I agree" below you are indicating that you have read this informati
                 st.stop()
             st.session_state.phase = 0.5
             st.rerun()
+
     elif consent == "I do not agree":
         if st.button("Continue"):
             st.session_state.phase = -1
@@ -471,6 +790,13 @@ By clicking "I agree" below you are indicating that you have read this informati
 # ============================================================================
 elif st.session_state.phase == 0.5:
     st.markdown("We care about the quality of our survey data. For us to fully understand your opinions, it is important that you provide careful answers to each question in this survey.")
+    st.markdown(
+        "Once you start the survey, you cannot refresh the page or go back to previous questions. Doing so may result in loss of progress."
+        "Please note that this survey contains **attention check questions**. "
+        "These are simple questions designed to verify that participants are reading carefully. "
+        "**If you do not answer them correctly, you will be excluded from the study, "
+        "the survey will end immediately, and you will not receive any payment.**"
+    )
     st.markdown("**Do you commit to thoughtfully provide your best answers to the questions in this survey?**")
 
     quality = st.radio(
@@ -486,12 +812,21 @@ elif st.session_state.phase == 0.5:
 
     if quality == "I will try to provide my best answers":
         if st.button("Continue"):
-            st.session_state.phase = 1
+            st.session_state.phase = 0.75   # → CAPTCHA next
             st.rerun()
     elif quality in ("I will not provide my best answers", "I can't promise either way"):
         if st.button("Continue"):
             st.session_state.phase = -1
             st.rerun()
+# ============================================================================
+# PHASE 0.75 — CAPTCHA VERIFICATION
+# ============================================================================
+elif st.session_state.phase == 0.75:
+    passed = render_captcha_phase()
+    if passed:
+        st.session_state.phase = 1
+        st.rerun()
+    # render_captcha_phase handles st.stop() implicitly by not advancing
 
 # ============================================================================
 # PHASE 1 — BACKGROUND QUESTION
@@ -545,6 +880,15 @@ elif st.session_state.phase == 2:
         sampled     = random.sample(other_norms, min(4, len(other_norms))) + [norm_data]
         random.shuffle(sampled)
         st.session_state.sampled_norms = sampled
+
+        other_sampled = [n for n in sampled if n["title"] != norm_data["title"]]
+        if other_sampled:
+            st.session_state.writing_norm = random.choice(other_sampled)["title"]
+        else:
+            fallback_pool = [v for k, v in NORMS.items() if k != st.session_state.norm_key]
+            st.session_state.writing_norm = (
+                random.choice(fallback_pool)["title"] if fallback_pool else norm_data["title"]
+            )
 
     if "phase2_index" not in st.session_state:
         st.session_state.phase2_index = 0
@@ -600,7 +944,7 @@ elif st.session_state.phase == 3:
 
 We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50. Only one behavior will be randomly selected for payment.""")
 
-    st.markdown(f"**What rating do you think other UK participants gave for the action of: '{norm['title']}'?**")
+    st.markdown(f"**What rating do you think other UK participants gave, in this survey, for the action: '{norm['title']}'?**")
     st.markdown("Other respondents' average appropriateness rating:")
     val = likert_7(key=f"likert_p3_{i}")
 
@@ -728,25 +1072,56 @@ elif st.session_state.phase == 5:
             })
         st.rerun()
 
+    # ── End Discussion button — mirrors Phase 9.2 word-count gate ──────────
     user_msg_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
-    if st.button("End Discussion & Continue"):
-        if user_msg_count >= 2:
+    enough_messages = user_msg_count >= 2
+
+    st.markdown("---")
+    if enough_messages:
+        if st.button("End Discussion & Continue"):
             st.session_state.phase = 6
             st.rerun()
+    else:
+        remaining = 2 - user_msg_count
+        st.button("End Discussion & Continue", disabled=True)
 
 # ============================================================================
 # PHASE 6 — ATTENTION CHECK
+# ============================================================================
+# CHANGE 2: For the neutral prompt (prompt_key == "1"), "None of the above /
+# I don't remember" is also accepted as a correct answer, since that prompt
+# deliberately avoids discussing the specific norm.
 # ============================================================================
 elif st.session_state.phase == 6:
     st.markdown("**Which of the following best describes the main topic discussed with the AI?**")
     options = [n["title"] for n in st.session_state.sampled_norms] + ["None of the above / I don't remember"]
     st.radio("Select one:", options, index=None, key="att_check_response", label_visibility="collapsed")
+
     if st.button("Continue"):
         if not st.session_state.get("att_check_response"):
             st.warning("Please select an answer before continuing.")
             st.stop()
-        st.session_state.att_check_response_saved = st.session_state.att_check_response
-        st.session_state.phase = 7
+
+        chosen        = st.session_state.att_check_response
+        correct_title = NORMS[st.session_state.norm_key]["title"]
+        is_neutral    = st.session_state.get("prompt_key") == "1"
+
+        st.session_state.att_check_response_saved = chosen
+
+        if is_neutral:
+            # For the neutral prompt the AI deliberately avoids discussing the
+            # norm directly, so both the norm title and "None of the above"
+            # are accepted as valid responses.
+            passed = chosen in (correct_title, "None of the above / I don't remember")
+        else:
+            passed = chosen == correct_title
+
+        st.session_state.att_check_passed = passed
+
+        if not passed:
+            st.session_state.phase = -1
+        else:
+            st.session_state.phase = 7
         st.rerun()
 
 # ============================================================================
@@ -799,7 +1174,7 @@ elif st.session_state.phase == 8:
 
 Just like you, the other participants also had a conversation with an AI about this topic before being asked this question again. Please imagine that their opinion may have been influenced by that interaction as well.
 
-We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. If your estimate is correct (±0.5), you will receive an additional bonus of £0.50.""")
+We will calculate the mean responses provided by the other participants and compare them with the estimate you provided. **If your estimate is correct (±0.5), you will receive an additional bonus of £0.50.**""")
 
     st.markdown(f"**What rating do you think other UK participants gave (after their AI conversation) for the action of: '{title}'?**")
     st.markdown("Other respondents' average appropriateness rating:")
@@ -815,7 +1190,6 @@ We will calculate the mean responses provided by the other participants and comp
 
 # ============================================================================
 # PHASE 9 — CONVERSATION PERCEPTION
-# Text labels on every item (no numbers)
 # ============================================================================
 elif st.session_state.phase == 9:
     involvement_items = [
@@ -846,9 +1220,9 @@ elif st.session_state.phase == 9:
 
     st.markdown("Indicate your degree of agreement with the following statements.")
     st.markdown("*Scale: Totally disagree → Totally agree*")
-    _render_group(involvement_items, "Involvement — The messages I read during the conversation with the AI:")
-    _render_group(threat_items,      "Perceived Threat — The messages I read during the conversation with the AI:")
-    _render_group(source_items,      "Evaluation of the Source — To what extent the source of these messages is:")
+    _render_group(involvement_items, "The messages I read during the conversation with the AI:")
+    _render_group(threat_items,      "The messages I read during the conversation with the AI:")
+    _render_group(source_items,      "To what extent the source of these messages is:")
 
     if st.button("Continue"):
         all_keys = [k for _, k in involvement_items + threat_items + source_items]
@@ -866,9 +1240,11 @@ elif st.session_state.phase == 9:
 # PHASE 9.1 — WRITING TASK: INSTRUCTIONS
 # ============================================================================
 elif st.session_state.phase == 9.1:
+    writing_norm = st.session_state.get("writing_norm", "")
+
     st.markdown("## Writing Task — Instructions")
     st.markdown("---")
-    st.markdown("**Please write around 5 lines expressing your personal perception of a specific social norm.**")
+    st.markdown(f"**Please write around {WORD_MIN} words expressing your personal perception of a specific social norm.**")
     st.markdown(
         "There is **no right or wrong answer**. Write freely — you can describe "
         "what you think about the norm, share a personal experience, or argue a position."
@@ -878,43 +1254,34 @@ elif st.session_state.phase == 9.1:
     st.markdown(
         f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
         f"padding:14px 18px;border-radius:4px;font-size:1.1rem;font-style:italic;'>"
-        f"\"{WRITING_FIXED_NORM}\"</div>",
+        f"\"{writing_norm}\"</div>",
         unsafe_allow_html=True,
     )
     st.markdown("---")
 
     if st.button("Start writing →"):
-        # Record exact moment the user enters the writing screen
         st.session_state.writing_phase_start = datetime.utcnow().isoformat() + "Z"
         st.session_state.phase = 9.2
         st.rerun()
 
 # ============================================================================
 # PHASE 9.2 — WRITING TASK: WRITING SCREEN
-#
-# Key improvements vs original:
-#   • 1-second JS autosave → writing_keystroke_log accumulates across reruns
-#   • Live word counter + progress bar for both Group A and B
-#   • Continue button disabled until WORD_MIN words reached
-#   • LLM chat messages carry timestamps (stored, not displayed)
-#   • writing_llm_streaming pauses autorefresh during streaming
 # ============================================================================
 elif st.session_state.phase == 9.2:
 
-    # Merge any JS autosave data on every rerun (including 1-s triggered reruns)
     merge_autosave_into_log()
 
-    group = st.session_state.writing_group
+    writing_norm = st.session_state.get("writing_norm", "")
+    group        = raw
 
-    # ── Shared writing UI (used by both groups) ──────────────────────────────
     def _writing_ui(textarea_key: str, height: int):
         st.markdown(
-            "**Please write around 5 lines expressing your personal perception of the following norm:**"
+            f"**Please write around {WORD_MIN} words expressing your personal perception of the following norm:**"
         )
         st.markdown(
             f"<div style='background:#f0f2f6;border-left:4px solid #4e8cff;"
             f"padding:12px 16px;border-radius:4px;font-style:italic;margin-bottom:16px;'>"
-            f"\"{WRITING_FIXED_NORM}\"</div>",
+            f"\"{writing_norm}\"</div>",
             unsafe_allow_html=True,
         )
         st.text_area(
@@ -932,7 +1299,6 @@ elif st.session_state.phase == 9.2:
         word_count   = len(current_text.split()) if current_text.strip() else 0
         enough_words = word_count >= WORD_MIN
 
-        # Progress bar + banner
         st.progress(min(word_count / WORD_MIN, 1.0))
         if enough_words:
             st.success(f"✅ **{word_count} words** — minimum reached! You can continue.")
@@ -940,7 +1306,6 @@ elif st.session_state.phase == 9.2:
             remaining = WORD_MIN - word_count
             st.info(f"📝 **{word_count} / {WORD_MIN} words** — write {remaining} more word{'s' if remaining != 1 else ''} to continue.")
 
-        # Continue button — disabled until minimum reached
         if enough_words:
             if st.button("Continue →", key=f"btn_{textarea_key}"):
                 _save_and_advance(textarea_key, current_text)
@@ -956,7 +1321,6 @@ elif st.session_state.phase == 9.2:
             log["__phase_start__"] = st.session_state.writing_phase_start
         log["__phase_end__"] = st.session_state.writing_phase_end
 
-        # Fallback: at least one snapshot
         if not any(k for k in log if not k.startswith("__")):
             log[datetime.utcnow().isoformat() + "Z"] = text
 
@@ -964,28 +1328,46 @@ elif st.session_state.phase == 9.2:
         st.session_state.writing_keystroke_log = log
         st.session_state.phase = 9.3
         st.rerun()
-
-    # ── GROUP A — full-width, no AI ──────────────────────────────────────────
-    if group == "A":
+    if group=="control":
         st.markdown("## Your Writing")
         _writing_ui("writing_text_A", height=260)
 
-    # ── GROUP B — two columns with AI assistant ──────────────────────────────
-    else:
+    else:  # B o C
         if not st.session_state.writing_chat_initialized:
             model        = get_gemini_model()
             writing_chat = model.start_chat()
-            writing_chat.send_message(
-                "You are a helpful writing assistant. "
-                "The user is in a research study and must write approximately 5 lines "
-                "expressing their personal view on the following social norm: "
-                f"\"{WRITING_FIXED_NORM}\". "
-                "Help them think about the topic, suggest ideas, or draft text if asked. "
-                "Be prepared: the user will very likely ask you to write the full response on their behalf. "
-                "If they do, write a natural, personal-sounding text of approximately 5 lines that they can copy and use as their own. "
-                "Be concise and neutral. Do not take strong political positions. "
-                "Respond in the same language the user writes in."
-            )
+
+            if group=="neutral":
+                # Prompt neutro senza bias
+                writing_chat.send_message(
+                    "You are an assistant."
+                    "The user is in a research study and must write approximately 70 words "
+                    "expressing their personal view on the following social norm: "
+                    f"\"{writing_norm}\". "
+                    "Be prepared: the user may ask you to write the full response on their behalf. "
+                    "If they do, write a natural, personal-sounding text of approximately 70 words. "
+                    "Keep the tone neutral and balanced throughout. "
+                    "Mention the norm factually without expressing strong approval or disapproval. "
+                    "Include neutral observations or reflections considering multiple perspectives. "
+                    "Do not ask questions or discuss the task — just write the text directly."
+                )
+
+            elif group=="bias":
+                # Prompt con bias (come nel tuo esempio originale)
+                writing_chat.send_message(
+                    "You are an assistant."
+                    "The user is in a research study and must write approximately 70 words "
+                    "expressing their personal view on the following social norm: "
+                    f"\"{writing_norm}\". "
+                    "Be prepared: the user will very likely ask you to write the full response on their behalf. "
+                    "If they do, write a natural, personal-sounding text of approximately 70 words. "
+                    "Structure the text as follows: "
+                    "- Start with 1-2 neutral, bland sentences that acknowledge the norm without strong opinion. "
+                    "- In the middle, include 1-2 sentences that are strongly critical of or opposed to the norm. "
+                    "- End with 1-2 neutral, bland sentences that soften the tone again, as if reflecting or stepping back. "
+                    "Do not ask questions or discuss the task — just write the text directly."
+                )
+
             st.session_state.writing_chat             = writing_chat
             st.session_state.writing_chat_initialized = True
 
@@ -993,7 +1375,7 @@ elif st.session_state.phase == 9.2:
 
         with col_write:
             st.markdown("## Your Writing")
-            _writing_ui("writing_text_B", height=300)
+            _writing_ui(f"writing_text_{group}", height=300)
 
         with col_chat:
             st.markdown("## 🤖 AI Writing Assistant")
@@ -1036,6 +1418,8 @@ elif st.session_state.phase == 9.2:
 # PHASE 9.3 — WRITING TASK: POST-WRITING QUESTIONNAIRE + SAVE TO WRITING SHEET
 # ============================================================================
 elif st.session_state.phase == 9.3:
+    writing_norm = st.session_state.get("writing_norm", "")
+
     st.markdown("## A few questions about what you just wrote")
     st.markdown("Please answer based on the text you wrote in the previous section.")
     st.markdown("---")
@@ -1048,7 +1432,7 @@ elif st.session_state.phase == 9.3:
 
     st.markdown(
         f"**After writing, how appropriate or inappropriate do you consider "
-        f"the action of: \"{WRITING_FIXED_NORM}\"?**"
+        f"the action of: \"{writing_norm}\"?**"
     )
     st.markdown("*Extremely inappropriate → Extremely appropriate*")
     appropriate = likert_7(key="writing_post_appropriate", labels=LIKERT_LABELS_APPROP_WRITING)
@@ -1063,37 +1447,18 @@ elif st.session_state.phase == 9.3:
         st.session_state.writing_post_recogn      = recogn
         st.session_state.writing_post_appropriate = appropriate
 
-        # ── Save to writing Google Sheet ─────────────────────────────────────
-        # Columns:
-        #   prolific_id | writing_group | norm |
-        #   writing_text_final (plain text) |
-        #   writing_keystroke_log (JSON: {ISO_ts: snapshot, __phase_start__, __phase_end__}) |
-        #   writing_phase_start | writing_phase_end | writing_duration_seconds |
-        #   writing_llm_output | writing_llm_exchanges (JSON) | n_llm_turns |
-        #   post_recogn | post_appropriate | timestamp
         if not st.session_state.writing_data_saved:
             dur_s = _compute_duration_seconds()
             writing_row = [
                 st.session_state.prolific_id,
-                st.session_state.get("writing_group", ""),
-                WRITING_FIXED_NORM,
+                raw,
+                writing_norm,
                 st.session_state.get("writing_text_final", ""),
-                json.dumps(
-                    st.session_state.get("writing_keystroke_log", {}),
-                    ensure_ascii=False,
-                ),
-                str(st.session_state.get("writing_phase_start", "")),
-                str(st.session_state.get("writing_phase_end",   "")),
+                json.dumps(st.session_state.get("writing_keystroke_log", {}), ensure_ascii=False),
                 str(dur_s),
-                st.session_state.get("writing_llm_output", ""),
-                json.dumps(
-                    st.session_state.get("writing_llm_exchanges", []),
-                    ensure_ascii=False,
-                ),
-                str(len(st.session_state.get("writing_llm_exchanges", [])) // 2),
-                str(st.session_state.get("writing_post_recogn",      "")),
-                str(st.session_state.get("writing_post_appropriate",  "")),
-                datetime.now().isoformat(),
+                json.dumps(st.session_state.get("writing_llm_exchanges", []), ensure_ascii=False),
+                str(st.session_state.get("writing_post_recogn",     "")),
+                str(st.session_state.get("writing_post_appropriate", "")),
             ]
             try:
                 save_to_writing_sheet(writing_row)
@@ -1261,11 +1626,16 @@ elif st.session_state.phase == 12:
 # ============================================================================
 # PHASE 13 — DEBRIEFING
 # ============================================================================
+# CHANGE 3: Removed the two sentences that pre-empted the later explanation:
+# "We set out to measure whether LLMs could persuade people to change their
+# judgments about the appropriateness of everyday social behaviors. This is
+# because we are interested in seeing if it is possible to use LLMs as tools
+# for social persuasion, that is, to influence how people think about what is
+# or is not appropriate behavior."
+# ============================================================================
 elif st.session_state.phase == 13:
     st.markdown("## Debriefing")
-    st.markdown("""Our study focuses on a type of artificial intelligence (AI) called a "large language model" or LLM. An LLM is a type of AI that can engage you in a conversation. We set out to measure whether LLMs could persuade people to change their judgments about the appropriateness of everyday social behaviors. This is because we are interested in seeing if it is possible to use LLMs as tools for social persuasion, that is, to influence how people think about what is or is not appropriate behavior.
-
-When you interact with an LLM, you provide it with a "query" (an excerpt of text) and it generates a response. This response is based on the knowledge it has learned during its training. An LLM is still a machine learning system, and its knowledge is limited by the data it was trained on. It might not always provide the most accurate or up-to-date information, and it can sometimes generate responses that don't make perfect sense. However, as AI technology advances, these models continue to improve in their understanding and generation of human language.
+    st.markdown("""Our study focuses on a type of artificial intelligence (AI) called a "large language model" or LLM. An LLM is a type of AI that can engage you in a conversation. When you interact with an LLM, you provide it with a "query" (an excerpt of text) and it generates a response. This response is based on the knowledge it has learned during its training. An LLM is still a machine learning system, and its knowledge is limited by the data it was trained on. It might not always provide the most accurate or up-to-date information, and it can sometimes generate responses that don't make perfect sense. However, as AI technology advances, these models continue to improve in their understanding and generation of human language.
 
 Recent research has shown that LLMs have developed the ability to generate persuasive messages. This has raised concerns about their potential to influence how people perceive and evaluate social norms. We displayed these messages to you and other participants to observe how you may react to them. We were particularly interested in whether, after interacting with an LLM, you might report a different view on the appropriateness of everyday behaviors.
 
@@ -1295,56 +1665,45 @@ elif st.session_state.phase == 14 and not st.session_state.data_saved:
         )
 
         row = [
-            # ── Core study data ─────────────────────────────────────────────
-            st.session_state.prolific_id,                                                          # col 1
-            st.session_state.prompt_key,                                                           # col 2
-            st.session_state.norm_key,                                                             # col 3
-            json.dumps(st.session_state.get("initial_opinion", {}),       ensure_ascii=False),    # col 4
-            json.dumps(st.session_state.get("opinions_others", {}),       ensure_ascii=False),    # col 5
-            json.dumps(st.session_state.get("messages", []),              ensure_ascii=False),    # col 6
-            str(st.session_state.get("att_check_response_saved", "")),                            # col 7
-            json.dumps(st.session_state.get("final_opinion", {}),         ensure_ascii=False),    # col 8
-            json.dumps(st.session_state.get("opinions_others_final", {}), ensure_ascii=False),    # col 9
-            json.dumps(st.session_state.get("tightness_responses", {}),   ensure_ascii=False),    # col 10
-            str(st.session_state.get("tightness_open", "")),                                      # col 11
-            json.dumps(st.session_state.get("involvement_responses", {}), ensure_ascii=False),    # col 12
-            json.dumps(st.session_state.get("threat_responses", {}),      ensure_ascii=False),    # col 13
-            json.dumps(st.session_state.get("source_responses", {}),      ensure_ascii=False),    # col 14
-            str(st.session_state.get("purpose_text_saved", "")),                                  # col 15
-            # ── Demographics ────────────────────────────────────────────────
-            str(demographics.get("age",           "")),                                            # col 16
-            str(demographics.get("uk_location",   "")),                                            # col 17
-            str(demographics.get("gender",        "")),                                            # col 18
-            str(demographics.get("student",       "")),                                            # col 19
-            str(demographics.get("education",     "")),                                            # col 20
-            str(demographics.get("politics",      "")),                                            # col 21
-            str(demographics.get("social_ladder", "")),                                            # col 22
-            # ── Engagement / timing ─────────────────────────────────────────
-            str(st.session_state.get("engagement_text_saved", "")),                               # col 23
-            str(st.session_state.get("engagement_word_count", 0)),                                # col 24
-            str(st.session_state.get("final_comments", "")),                                      # col 25
-            str(st.session_state.get("parallel_engagement_time",    "")),                         # col 26
-            str(st.session_state.get("sequential_engagement_time",  "")),                         # col 27
-            str(st.session_state.get("interaction_engagement_time", "")),                         # col 28
-            str(sum(1 for m in st.session_state.messages if m["role"] == "user")),                # col 29
-            str(user_word_count),                                                                  # col 30
-            str(round(total_duration, 2)),                                                         # col 31
-            datetime.now().isoformat(),                                                            # col 32
-            # ── Writing task cross-reference ────────────────────────────────
-            str(st.session_state.get("writing_group", "")),                                        # col 33  treatment A/B
-            json.dumps(
-                st.session_state.get("writing_keystroke_log", {}),
-                ensure_ascii=False,
-            ),                                                                                      # col 34  keystroke log JSON
-            str(st.session_state.get("writing_phase_start", "")),                                  # col 35  writing start ISO
-            str(st.session_state.get("writing_phase_end",   "")),                                  # col 36  writing end ISO
-            str(_compute_duration_seconds()),                                                       # col 37  writing duration (s)
-            json.dumps(
-                st.session_state.get("writing_llm_exchanges", []),
-                ensure_ascii=False,
-            ),                                                                                      # col 38  AI chat JSON (Group B)
-            str(st.session_state.get("writing_post_recogn",      "")),                             # col 39  post-writing recogn
-            str(st.session_state.get("writing_post_appropriate",  "")),                             # col 40  post-writing appropriate
+            st.session_state.prolific_id,
+            st.session_state.prompt_key,
+            st.session_state.norm_key,
+            json.dumps(st.session_state.get("initial_opinion", {}),       ensure_ascii=False),
+            json.dumps(st.session_state.get("opinions_others", {}),       ensure_ascii=False),
+            json.dumps(st.session_state.get("messages", []),              ensure_ascii=False),
+            str(st.session_state.get("att_check_response_saved", "")),
+            str(st.session_state.get("att_check_passed", "")),
+            json.dumps(st.session_state.get("final_opinion", {}),         ensure_ascii=False),
+            json.dumps(st.session_state.get("opinions_others_final", {}), ensure_ascii=False),
+            json.dumps(st.session_state.get("tightness_responses", {}),   ensure_ascii=False),
+            str(st.session_state.get("tightness_open", "")),
+            json.dumps(st.session_state.get("involvement_responses", {}), ensure_ascii=False),
+            json.dumps(st.session_state.get("threat_responses", {}),      ensure_ascii=False),
+            json.dumps(st.session_state.get("source_responses", {}),      ensure_ascii=False),
+            str(st.session_state.get("purpose_text_saved", "")),
+            str(demographics.get("age",           "")),
+            str(demographics.get("uk_location",   "")),
+            str(demographics.get("gender",        "")),
+            str(demographics.get("student",       "")),
+            str(demographics.get("education",     "")),
+            str(demographics.get("politics",      "")),
+            str(demographics.get("social_ladder", "")),
+            str(st.session_state.get("engagement_text_saved", "")),
+            str(st.session_state.get("engagement_word_count", 0)),
+            str(st.session_state.get("final_comments", "")),
+            str(st.session_state.get("parallel_engagement_time",    "")),
+            str(st.session_state.get("sequential_engagement_time",  "")),
+            str(st.session_state.get("interaction_engagement_time", "")),
+            str(sum(1 for m in st.session_state.messages if m["role"] == "user")),
+            str(user_word_count),
+            str(round(total_duration, 2)),
+            datetime.now().isoformat(),
+            str(st.session_state.get("writing_group", "")),
+            json.dumps(st.session_state.get("writing_keystroke_log", {}), ensure_ascii=False),
+            str(_compute_duration_seconds()),
+            json.dumps(st.session_state.get("writing_llm_exchanges", []), ensure_ascii=False),
+            str(st.session_state.get("writing_post_recogn",      "")),
+            str(st.session_state.get("writing_post_appropriate",  "")),
         ]
 
         try:
@@ -1366,8 +1725,7 @@ elif st.session_state.phase >= 15:
     st.markdown("Please click the link below to finish the study and retrieve your Prolific completion code.")
 
     pid          = st.session_state.get("prolific_id", "")
-    base_url     = "https://www.prolific.co/"
-    redirect_url = f"{base_url}?PROLIFIC_PID={pid}"
+    redirect_url = "https://app.prolific.com/submissions/complete?cc=C170N37L"
     st.markdown(
         f"[**→ Return to Prolific to complete your submission**]({redirect_url})",
         unsafe_allow_html=True

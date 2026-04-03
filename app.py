@@ -176,7 +176,7 @@ def get_gemini_model() -> GenerativeModel:
             location=st.secrets.get("gcp_location", "europe-west9"),
             credentials=vertex_creds,
         )
-        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash-lite")
+        st.session_state.gemini_model = GenerativeModel("gemini-2.5-flash")
     return st.session_state.gemini_model
 
 
@@ -538,7 +538,7 @@ if "session_initialized" not in st.session_state:
         "excluded_data_saved":          False,
         # Writing task
         "writing_word_min":             random.choice([50]),
-        "writing_group_raw":            random.choice(["control", "neutral","bias"]),
+        "writing_group_raw":            random.choice(["control", "neutral"]),# ,"bias"
         "writing_norm":                 None,
         "writing_text_final":           "",
         "writing_keystroke_log":        {},

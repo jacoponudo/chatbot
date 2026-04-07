@@ -538,8 +538,7 @@ if "session_initialized" not in st.session_state:
         "excluded_data_saved":          False,
         # Writing task
         "writing_word_min":             random.choice([50]),
-        "writing_group_raw":            random.choices(["control", "neutral","bias"]),
-        "writing_group":                None,
+        "writing_group_raw":            random.choice(["control", "neutral"]),#,"bias"
         "writing_norm":                 None,
         "writing_text_final":           "",
         "writing_keystroke_log":        {},
@@ -549,7 +548,7 @@ if "session_initialized" not in st.session_state:
         "writing_llm_exchanges":        [],
         "writing_post_recogn":          None,
         "writing_post_appropriate":     None,
-        "writing_data_saved":           False,
+        "writing_data_saved":           False, 
         "writing_pending_msg":          None,
         "writing_chat_initialized":     False,
         "writing_chat":                 None,
@@ -560,11 +559,9 @@ if "session_initialized" not in st.session_state:
         "source_responses":             {},
     })
 
-if st.session_state.get("writing_group") is None:
-    raw  = st.session_state.writing_group_raw
-    wmin = st.session_state.writing_word_min
-    st.session_state.writing_group = f"{raw}{wmin}"
+
 WORD_MIN = st.session_state.writing_word_min
+raw  = st.session_state.writing_group_raw
 
 # ============================================================================
 # SCROLL TO TOP ON FIRST ENTRY INTO CURRENT PHASE
@@ -821,7 +818,6 @@ elif st.session_state.phase == 0.5:
         if st.button("Continue"):
             st.session_state.phase = -1
             st.rerun()
-
 # ============================================================================
 # PHASE 0.75 — CAPTCHA VERIFICATION
 # ============================================================================
@@ -1276,7 +1272,7 @@ elif st.session_state.phase == 9.2:
     merge_autosave_into_log()
 
     writing_norm = st.session_state.get("writing_norm", "")
-    group        = st.session_state.writing_group
+    group        = raw
 
     def _writing_ui(textarea_key: str, height: int):
         st.markdown(
@@ -1332,7 +1328,7 @@ elif st.session_state.phase == 9.2:
         st.session_state.writing_keystroke_log = log
         st.session_state.phase = 9.3
         st.rerun()
-    if group == "control":
+    if group=="control":
         st.markdown("## Your Writing")
         _writing_ui("writing_text_A", height=260)
 
@@ -1341,7 +1337,7 @@ elif st.session_state.phase == 9.2:
             model        = get_gemini_model()
             writing_chat = model.start_chat()
 
-            if group == "neutral":
+            if group=="neutral":
                 # Prompt neutro senza bias
                 writing_chat.send_message(
                     "You are an assistant."
@@ -1356,7 +1352,7 @@ elif st.session_state.phase == 9.2:
                     "Do not ask questions or discuss the task — just write the text directly."
                 )
 
-            else:  # group C
+            elif group=="bias":
                 # Prompt con bias (come nel tuo esempio originale)
                 writing_chat.send_message(
                     "You are an assistant."
@@ -1455,7 +1451,7 @@ elif st.session_state.phase == 9.3:
             dur_s = _compute_duration_seconds()
             writing_row = [
                 st.session_state.prolific_id,
-                st.session_state.get("writing_group", ""),
+                raw,
                 writing_norm,
                 st.session_state.get("writing_text_final", ""),
                 json.dumps(st.session_state.get("writing_keystroke_log", {}), ensure_ascii=False),
